@@ -42,3 +42,37 @@ impl Block {
         hex::encode(result)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_block_new_sets_fields() {
+        let tx = Transaction {
+            sender: "a".into(),
+            recipient: "b".into(),
+            amount: 10,
+        };
+        let block = Block::new(1, 123, vec![tx.clone()], "prev".into(), Some("me".into()));
+        assert_eq!(block.index, 1);
+        assert_eq!(block.timestamp, 123);
+        assert_eq!(block.transactions, vec![tx]);
+        assert_eq!(block.prev_hash, "prev");
+        assert_eq!(block.sender_addr, Some("me".into()));
+        assert_eq!(block.hash, block.calculate_hash());
+    }
+
+    #[test]
+    fn test_calculate_hash_consistency() {
+        let tx = Transaction {
+            sender: "x".into(),
+            recipient: "y".into(),
+            amount: 5,
+        };
+        let block = Block::new(2, 456, vec![tx], "prevhash".into(), None);
+        let h1 = block.hash.clone();
+        let h2 = block.calculate_hash();
+        assert_eq!(h1, h2);
+    }
+}
