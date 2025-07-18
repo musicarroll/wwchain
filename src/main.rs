@@ -10,42 +10,32 @@ use blockchain::Blockchain;
 use mempool::Mempool;
 use network_serialize::{NetworkMessage, start_server_with_chain, broadcast_message};
 use peer::PeerList;
-use std::env;
+use clap::Parser;
+
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Cli {
+    /// TCP port to listen on
+    #[arg(long, default_value = "6001")]
+    port: String,
+
+    /// Friendly node name for prompts
+    #[arg(long, default_value = "node1")]
+    node_name: String,
+
+    /// Comma separated peer addresses
+    #[arg(long, default_value = "")]
+    peers: String,
+}
 use std::sync::{Arc, Mutex};
 use std::thread;
 
 fn main() {
-    // --- Command-line argument parsing ---
-    let args: Vec<String> = env::args().collect();
-    let mut port = "6001".to_string();
-    let mut node_name = "node1".to_string();
-    let mut peers_csv = String::new();
-    let mut i = 1;
-    while i < args.len() {
-        if args[i].starts_with("--") {
-            // Handle --flag=value style
-            if let Some((flag, value)) = args[i].split_once('=') {
-                match flag {
-                    "--port" => port = value.to_string(),
-                    "--peers" => peers_csv = value.to_string(),
-                    "--node-name" => node_name = value.to_string(),
-                    _ => {}
-                }
-                i += 1;
-            } else {
-                // Handle --flag value style
-                match args[i].as_str() {
-                    "--port" if i+1 < args.len() => { port = args[i+1].clone(); i += 2; continue; },
-                    "--peers" if i+1 < args.len() => { peers_csv = args[i+1].clone(); i += 2; continue; },
-                    "--node-name" if i+1 < args.len() => { node_name = args[i+1].clone(); i += 2; continue; },
-                    _ => {}
-                }
-                i += 1;
-            }
-        } else {
-            i += 1;
-        }
-    }
+    // --- Command-line argument parsing using clap ---
+    let cli = Cli::parse();
+    let port = cli.port;
+    let node_name = cli.node_name;
+    let peers_csv = cli.peers;
     let server_addr = format!("127.0.0.1:{}", port);
 
     // --- Initialize peer list ---
