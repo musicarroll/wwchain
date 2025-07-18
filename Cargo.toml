@@ -9,6 +9,7 @@ hex = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 # Arc/Mutex/threading are built-in (std), no crate needed.
 
@@ -23,3 +24,6 @@ clap = { version = "4", features = ["derive"] }
 
 # Dev: Uncomment for hot reloading (not needed in production)
 # cargo-watch = "8.4"
+
+[features]
+sync = []

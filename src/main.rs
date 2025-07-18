@@ -28,9 +28,9 @@ struct Cli {
     peers: String,
 }
 use std::sync::{Arc, Mutex};
-use std::thread;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     // --- Command-line argument parsing using clap ---
     let cli = Cli::parse();
     let port = cli.port;
@@ -49,14 +49,14 @@ fn main() {
     // --- Blockchain: shared (Arc<Mutex<_>> for reconciliation) ---
     let blockchain = Arc::new(Mutex::new(Blockchain::new()));
 
-    // --- Start server in a background thread ---
+    // --- Start server in a background task ---
     {
         let bc = blockchain.clone();
         let p = peers.clone();
         let addr = server_addr.clone();
         let me = server_addr.clone();
-        thread::spawn(move || {
-            start_server_with_chain(&addr, bc, p, me).unwrap();
+        tokio::spawn(async move {
+            start_server_with_chain(&addr, bc, p, me).await.unwrap();
         });
     }
 
@@ -78,13 +78,13 @@ fn main() {
     }
 
     // --- Broadcast a greeting and a transaction to all peers ---
-    broadcast_message(peers.clone(), &NetworkMessage::Text(format!("Hello from {}!", node_name)));
+    broadcast_message(peers.clone(), &NetworkMessage::Text(format!("Hello from {}!", node_name))).await;
     let tx = Transaction {
         sender: node_name.clone(),
         recipient: "bob".to_string(),
         amount: 42,
     };
-    broadcast_message(peers.clone(), &NetworkMessage::Transaction(tx));
+    broadcast_message(peers.clone(), &NetworkMessage::Transaction(tx)).await;
 
     use std::io::{self, Write};
 
@@ -109,7 +109,7 @@ fn main() {
 
                 let last_block = bc.chain.last().unwrap().clone();
                 drop(bc); // unlock before broadcast
-                broadcast_message(peers.clone(), &NetworkMessage::Block(last_block));
+                broadcast_message(peers.clone(), &NetworkMessage::Block(last_block)).await;
             }
             "add" if parts.len() == 2 => {
                 let peer_addr = parts[1];
