@@ -30,3 +30,19 @@ impl PeerList {
         self.peers.lock().unwrap().contains(&addr.to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_peerlist_add_remove_contains() {
+        let peers = PeerList::new();
+        peers.add_peer("peer1");
+        assert!(peers.contains("peer1"));
+        peers.add_peer("peer1");
+        assert_eq!(peers.all().len(), 1); // no duplicates
+        peers.remove_peer("peer1");
+        assert!(!peers.contains("peer1"));
+    }
+}

@@ -39,3 +39,26 @@ pub fn send_message(addr: &str, msg: &str) -> io::Result<()> {
     println!("Server responded: {}", String::from_utf8_lossy(&buffer[..size]));
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_send_message() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = [0u8; 512];
+                let size = stream.read(&mut buf).unwrap();
+                assert_eq!(b"ping", &buf[..size]);
+                stream.write_all(b"pong").unwrap();
+            }
+        });
+
+        let res = send_message(&addr.to_string(), "ping");
+        assert!(res.is_ok());
+        handle.join().unwrap();
+    }
+}

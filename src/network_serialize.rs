@@ -168,3 +168,97 @@ pub fn request_chain_and_reconcile(addr: &str, blockchain: Arc<Mutex<Blockchain>
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    #[test]
+    fn test_network_message_serialize_roundtrip() {
+        let msg = NetworkMessage::Text("hello".into());
+        let data = msg.serialize();
+        let de: NetworkMessage = serde_json::from_slice(&data).unwrap();
+        match de {
+            NetworkMessage::Text(s) => assert_eq!(s, "hello"),
+            _ => panic!("unexpected variant"),
+        }
+    }
+
+    #[test]
+    fn test_handle_chain_response_replaces_chain() {
+        let mut local = Blockchain::new();
+        let mut their = Blockchain::new();
+        their.add_block(
+            vec![Transaction { sender: "a".into(), recipient: "b".into(), amount: 1 }],
+            Some("addr".into()),
+        );
+        handle_chain_response(&mut local, their.chain.clone());
+        assert_eq!(local.chain.len(), 2);
+    }
+
+    #[test]
+    fn test_send_and_broadcast_message() {
+        let listener1 = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr1 = listener1.local_addr().unwrap();
+        let listener2 = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr2 = listener2.local_addr().unwrap();
+        let counter = Arc::new(AtomicUsize::new(0));
+
+        let c1 = counter.clone();
+        thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener1.accept() {
+                let mut buf = [0u8; 1024];
+                let _ = stream.read(&mut buf).unwrap();
+                c1.fetch_add(1, Ordering::SeqCst);
+                stream.write_all(b"ok").unwrap();
+            }
+        });
+
+        let c2 = counter.clone();
+        thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener2.accept() {
+                let mut buf = [0u8; 1024];
+                let _ = stream.read(&mut buf).unwrap();
+                c2.fetch_add(1, Ordering::SeqCst);
+                stream.write_all(b"ok").unwrap();
+            }
+        });
+
+        let peers = Arc::new(PeerList::new());
+        peers.add_peer(&addr1.to_string());
+        peers.add_peer(&addr2.to_string());
+        broadcast_message(peers, &NetworkMessage::Text("hi".into()));
+
+        thread::sleep(Duration::from_millis(100));
+        assert_eq!(counter.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn test_request_chain_and_reconcile() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let mut their_chain = Blockchain::new();
+        their_chain.add_block(
+            vec![Transaction { sender: "x".into(), recipient: "y".into(), amount: 5 }],
+            Some("addr".into()),
+        );
+        thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = [0u8; 65536];
+                let size = stream.read(&mut buf).unwrap();
+                let _req: NetworkMessage = serde_json::from_slice(&buf[..size]).unwrap();
+                let resp = NetworkMessage::ChainResponse(their_chain.chain.clone());
+                let resp_buf = resp.serialize();
+                stream.write_all(&resp_buf).unwrap();
+            }
+        });
+
+        let local = Arc::new(Mutex::new(Blockchain::new()));
+        request_chain_and_reconcile(&addr.to_string(), local.clone());
+        thread::sleep(Duration::from_millis(100));
+        assert_eq!(local.lock().unwrap().chain.len(), 2);
+    }
+}
+

@@ -56,3 +56,39 @@ impl Blockchain {
         true
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_blockchain_new_creates_genesis() {
+        let bc = Blockchain::new();
+        assert_eq!(bc.chain.len(), 1);
+        assert_eq!(bc.chain[0].index, 0);
+    }
+
+    #[test]
+    fn test_add_block() {
+        let mut bc = Blockchain::new();
+        let tx = Transaction { sender: "a".into(), recipient: "b".into(), amount: 1 };
+        bc.add_block(vec![tx.clone()], Some("addr".into()));
+        assert_eq!(bc.chain.len(), 2);
+        let last = bc.chain.last().unwrap();
+        assert_eq!(last.index, 1);
+        assert_eq!(last.transactions, vec![tx]);
+        assert_eq!(last.prev_hash, bc.chain[0].hash);
+    }
+
+    #[test]
+    fn test_is_valid_chain_detection() {
+        let mut bc = Blockchain::new();
+        bc.add_block(
+            vec![Transaction { sender: "a".into(), recipient: "b".into(), amount: 2 }],
+            Some("addr".into()),
+        );
+        assert!(bc.is_valid_chain());
+        bc.chain[1].prev_hash = "bad".into();
+        assert!(!bc.is_valid_chain());
+    }
+}
