@@ -122,12 +122,13 @@ pub async fn handle_client_with_chain(mut stream: TcpStream, blockchain: Arc<Mut
                     }
                     NetworkMessage::Block(block) => {
                         println!("[SERIALIZED] Received Block: {:?}", block);
-                        let mut chain = blockchain.lock().unwrap();
-                        let local_tip = chain.chain.last().unwrap().index;
+                        let local_tip = {
+                            let chain = blockchain.lock().unwrap();
+                            chain.chain.last().unwrap().index
+                        };
                         if block.index > local_tip {
                             if let Some(sender_addr) = block.sender_addr.clone() {
                                 println!("[RECONCILE] Attempting to reconcile with block sender: {}", sender_addr);
-                                drop(chain);
                                 request_chain_and_reconcile(&sender_addr, blockchain.clone()).await;
                             } else {
                                 println!("[RECONCILE] Received block with no sender_addr!");
