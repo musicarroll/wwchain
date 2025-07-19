@@ -1,6 +1,7 @@
 use serde::{Serialize, Deserialize};
 use sha2::{Sha256, Digest};
 use secp256k1::{Secp256k1, SecretKey, PublicKey, Message, ecdsa::Signature};
+use rand::RngCore;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct Transaction {
@@ -60,12 +61,16 @@ impl Transaction {
 mod tests {
     use super::*;
     use rand::rngs::OsRng;
+    use rand::RngCore;
 
     #[test]
     fn sign_and_verify_roundtrip() {
         let secp = Secp256k1::new();
         let mut rng = OsRng;
-        let (sk, pk) = secp.generate_keypair(&mut rng);
+        let mut sk_bytes = [0u8; 32];
+        rng.fill_bytes(&mut sk_bytes);
+        let sk = SecretKey::from_slice(&sk_bytes).unwrap();
+        let pk = PublicKey::from_secret_key(&secp, &sk);
         let mut tx = Transaction {
             sender: hex::encode(pk.serialize()),
             recipient: "bob".into(),
@@ -80,7 +85,10 @@ mod tests {
     fn verify_fails_when_modified() {
         let secp = Secp256k1::new();
         let mut rng = OsRng;
-        let (sk, pk) = secp.generate_keypair(&mut rng);
+        let mut sk_bytes = [0u8; 32];
+        rng.fill_bytes(&mut sk_bytes);
+        let sk = SecretKey::from_slice(&sk_bytes).unwrap();
+        let pk = PublicKey::from_secret_key(&secp, &sk);
         let mut tx = Transaction {
             sender: hex::encode(pk.serialize()),
             recipient: "alice".into(),
