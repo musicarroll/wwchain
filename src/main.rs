@@ -14,6 +14,7 @@ use secp256k1::Secp256k1;
 use secp256k1::SecretKey;
 use secp256k1::PublicKey;
 use rand::rngs::OsRng;
+use rand::RngCore;
 use clap::Parser;
 
 #[derive(Parser, Debug)]
@@ -45,7 +46,10 @@ async fn main() {
     // --- Generate keypair for signing ---
     let secp = Secp256k1::new();
     let mut rng = OsRng;
-    let (secret_key, public_key) = secp.generate_keypair(&mut rng);
+    let mut sk_bytes = [0u8; 32];
+    rng.fill_bytes(&mut sk_bytes);
+    let secret_key = SecretKey::from_slice(&sk_bytes).unwrap();
+    let public_key = PublicKey::from_secret_key(&secp, &secret_key);
     let my_address = hex::encode(public_key.serialize());
 
     // --- Initialize peer list ---

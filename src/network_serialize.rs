@@ -328,6 +328,7 @@ mod tests {
     use std::time::Duration;
     use secp256k1::Secp256k1;
     use rand::rngs::OsRng;
+    use rand::RngCore;
     use hex;
 
     #[test]
@@ -347,7 +348,10 @@ mod tests {
         let mut their = Blockchain::new();
         let secp = Secp256k1::new();
         let mut rng = OsRng;
-        let (sk, pk) = secp.generate_keypair(&mut rng);
+        let mut sk_bytes = [0u8; 32];
+        rng.fill_bytes(&mut sk_bytes);
+        let sk = SecretKey::from_slice(&sk_bytes).unwrap();
+        let pk = PublicKey::from_secret_key(&secp, &sk);
         let mut tx = Transaction { sender: hex::encode(pk.serialize()), recipient: "b".into(), amount: 1, signature: None };
         tx.sign(&sk);
         their.add_block(vec![tx], Some("addr".into()));
@@ -400,7 +404,10 @@ mod tests {
         let mut their_chain = Blockchain::new();
         let secp = Secp256k1::new();
         let mut rng = OsRng;
-        let (sk, pk) = secp.generate_keypair(&mut rng);
+        let mut sk_bytes = [0u8; 32];
+        rng.fill_bytes(&mut sk_bytes);
+        let sk = SecretKey::from_slice(&sk_bytes).unwrap();
+        let pk = PublicKey::from_secret_key(&secp, &sk);
         let mut tx = Transaction { sender: hex::encode(pk.serialize()), recipient: "y".into(), amount: 5, signature: None };
         tx.sign(&sk);
         their_chain.add_block(vec![tx], Some("addr".into()));
