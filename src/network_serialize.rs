@@ -67,10 +67,18 @@ pub fn handle_client_with_chain(mut stream: TcpStream, blockchain: Arc<Mutex<Blo
                 match msg {
                     NetworkMessage::Transaction(tx) => {
                         println!("[SERIALIZED] Received Transaction: {:?}", tx);
-                        // You may wish to add to mempool here
+                        if !tx.verify() {
+                            eprintln!("[SERIALIZED] Invalid transaction signature");
+                        } else {
+                            // You may wish to add to mempool here
+                        }
                     },
                     NetworkMessage::Block(block) => {
                         println!("[SERIALIZED] Received Block: {:?}", block);
+                        if !block.transactions.iter().all(|tx| tx.verify()) {
+                            eprintln!("[SERIALIZED] Block contains invalid transaction");
+                            return;
+                        }
                         let mut chain = blockchain.lock().unwrap();
                         let local_tip = chain.chain.last().unwrap().index;
                         if block.index > local_tip {
@@ -119,9 +127,16 @@ pub async fn handle_client_with_chain(mut stream: TcpStream, blockchain: Arc<Mut
                 match msg {
                     NetworkMessage::Transaction(tx) => {
                         println!("[SERIALIZED] Received Transaction: {:?}", tx);
+                        if !tx.verify() {
+                            eprintln!("[SERIALIZED] Invalid transaction signature");
+                        }
                     }
                     NetworkMessage::Block(block) => {
                         println!("[SERIALIZED] Received Block: {:?}", block);
+                        if !block.transactions.iter().all(|tx| tx.verify()) {
+                            eprintln!("[SERIALIZED] Block contains invalid transaction");
+                            return;
+                        }
                         let local_tip = {
                             let chain = blockchain.lock().unwrap();
                             chain.chain.last().unwrap().index
@@ -311,6 +326,9 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
+    use secp256k1::Secp256k1;
+    use rand::rngs::OsRng;
+    use hex;
 
     #[test]
     fn test_network_message_serialize_roundtrip() {
@@ -327,10 +345,12 @@ mod tests {
     fn test_handle_chain_response_replaces_chain() {
         let mut local = Blockchain::new();
         let mut their = Blockchain::new();
-        their.add_block(
-            vec![Transaction { sender: "a".into(), recipient: "b".into(), amount: 1 }],
-            Some("addr".into()),
-        );
+        let secp = Secp256k1::new();
+        let mut rng = OsRng;
+        let (sk, pk) = secp.generate_keypair(&mut rng);
+        let mut tx = Transaction { sender: hex::encode(pk.serialize()), recipient: "b".into(), amount: 1, signature: None };
+        tx.sign(&sk);
+        their.add_block(vec![tx], Some("addr".into()));
         handle_chain_response(&mut local, their.chain.clone());
         assert_eq!(local.chain.len(), 2);
     }
@@ -378,10 +398,12 @@ mod tests {
         let addr = listener.local_addr().unwrap();
 
         let mut their_chain = Blockchain::new();
-        their_chain.add_block(
-            vec![Transaction { sender: "x".into(), recipient: "y".into(), amount: 5 }],
-            Some("addr".into()),
-        );
+        let secp = Secp256k1::new();
+        let mut rng = OsRng;
+        let (sk, pk) = secp.generate_keypair(&mut rng);
+        let mut tx = Transaction { sender: hex::encode(pk.serialize()), recipient: "y".into(), amount: 5, signature: None };
+        tx.sign(&sk);
+        their_chain.add_block(vec![tx], Some("addr".into()));
         tokio::spawn(async move {
             if let Ok((mut stream, _)) = listener.accept().await {
                 let mut buf = [0u8; 65536];

@@ -12,6 +12,7 @@ impl Blockchain {
             sender: "genesis_address".to_string(),
             recipient: "first_user".to_string(),
             amount: 100,
+            signature: None,
         };
         let genesis_block = Block::new(
             0,
@@ -25,6 +26,10 @@ impl Blockchain {
 
     // Make this function accept sender_addr:
     pub fn add_block(&mut self, transactions: Vec<Transaction>, sender_addr: Option<String>) {
+        if !transactions.iter().all(|tx| tx.verify()) {
+            println!("[BLOCKCHAIN] Rejected block with invalid transaction signature");
+            return;
+        }
         let last_block = self.chain.last().unwrap();
         let index = last_block.index + 1;
         let timestamp = SystemTime::now()
@@ -60,6 +65,9 @@ impl Blockchain {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use secp256k1::Secp256k1;
+    use rand::rngs::OsRng;
+    use hex;
 
     #[test]
     fn test_blockchain_new_creates_genesis() {
@@ -71,7 +79,11 @@ mod tests {
     #[test]
     fn test_add_block() {
         let mut bc = Blockchain::new();
-        let tx = Transaction { sender: "a".into(), recipient: "b".into(), amount: 1 };
+        let secp = Secp256k1::new();
+        let mut rng = OsRng;
+        let (sk, pk) = secp.generate_keypair(&mut rng);
+        let mut tx = Transaction { sender: hex::encode(pk.serialize()), recipient: "b".into(), amount: 1, signature: None };
+        tx.sign(&sk);
         bc.add_block(vec![tx.clone()], Some("addr".into()));
         assert_eq!(bc.chain.len(), 2);
         let last = bc.chain.last().unwrap();
@@ -83,10 +95,12 @@ mod tests {
     #[test]
     fn test_is_valid_chain_detection() {
         let mut bc = Blockchain::new();
-        bc.add_block(
-            vec![Transaction { sender: "a".into(), recipient: "b".into(), amount: 2 }],
-            Some("addr".into()),
-        );
+        let secp = Secp256k1::new();
+        let mut rng = OsRng;
+        let (sk, pk) = secp.generate_keypair(&mut rng);
+        let mut tx = Transaction { sender: hex::encode(pk.serialize()), recipient: "b".into(), amount: 2, signature: None };
+        tx.sign(&sk);
+        bc.add_block(vec![tx], Some("addr".into()));
         assert!(bc.is_valid_chain());
         bc.chain[1].prev_hash = "bad".into();
         assert!(!bc.is_valid_chain());
