@@ -62,6 +62,7 @@ mod tests {
     use super::*;
     use rand::rngs::OsRng;
     use rand::RngCore;
+    use secp256k1::{Secp256k1, SecretKey, PublicKey};
 
     #[test]
     fn sign_and_verify_roundtrip() {
