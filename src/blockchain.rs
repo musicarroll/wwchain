@@ -65,7 +65,7 @@ impl Blockchain {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use secp256k1::Secp256k1;
+    use secp256k1::{Secp256k1, SecretKey, PublicKey};
     use rand::rngs::OsRng;
     use rand::RngCore;
     use hex;
