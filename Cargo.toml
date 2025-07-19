@@ -18,8 +18,8 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-uti
 # anyhow = "1.0"
 
 # Future: Crypto/REST/WebSockets, etc.
-# rand = "0.8"
-# secp256k1 = "0.28"      # For wallet/crypto
+rand = "0.8"
+secp256k1 = "0.28"
 # tiny-http = "0.12"      # For REST API
 
 # Dev: Uncomment for hot reloading (not needed in production)

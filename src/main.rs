@@ -10,6 +10,10 @@ use blockchain::Blockchain;
 use mempool::Mempool;
 use network_serialize::{NetworkMessage, start_server_with_chain, broadcast_message};
 use peer::PeerList;
+use secp256k1::Secp256k1;
+use secp256k1::SecretKey;
+use secp256k1::PublicKey;
+use rand::rngs::OsRng;
 use clap::Parser;
 
 #[derive(Parser, Debug)]
@@ -38,6 +42,12 @@ async fn main() {
     let peers_csv = cli.peers;
     let server_addr = format!("127.0.0.1:{}", port);
 
+    // --- Generate keypair for signing ---
+    let secp = Secp256k1::new();
+    let mut rng = OsRng;
+    let (secret_key, public_key) = secp.generate_keypair(&mut rng);
+    let my_address = hex::encode(public_key.serialize());
+
     // --- Initialize peer list ---
     let peers = Arc::new(PeerList::new());
     for peer_addr in peers_csv.split(',') {
@@ -65,11 +75,14 @@ async fn main() {
 
     // --- Mempool demo logic (per node, not shared) ---
     let mut mempool = Mempool::new();
-    mempool.add_tx(Transaction {
-        sender: format!("{}_first_user", node_name),
+    let mut demo_tx = Transaction {
+        sender: my_address.clone(),
         recipient: format!("{}_second_user", node_name),
         amount: 25,
-    });
+        signature: None,
+    };
+    demo_tx.sign(&secret_key);
+    mempool.add_tx(demo_tx);
     let txs_to_commit = mempool.drain();
     {
         let mut bc = blockchain.lock().unwrap();
@@ -79,11 +92,13 @@ async fn main() {
 
     // --- Broadcast a greeting and a transaction to all peers ---
     broadcast_message(peers.clone(), &NetworkMessage::Text(format!("Hello from {}!", node_name))).await;
-    let tx = Transaction {
-        sender: node_name.clone(),
+    let mut tx = Transaction {
+        sender: my_address.clone(),
         recipient: "bob".to_string(),
         amount: 42,
+        signature: None,
     };
+    tx.sign(&secret_key);
     broadcast_message(peers.clone(), &NetworkMessage::Transaction(tx)).await;
 
     use std::io::{self, Write};
@@ -103,7 +118,8 @@ async fn main() {
             "tx" if parts.len() == 3 => {
                 let recipient = parts[1].to_string();
                 let amount: u64 = parts[2].parse().unwrap_or(0);
-                let tx = Transaction { sender: node_name.clone(), recipient, amount };
+                let mut tx = Transaction { sender: my_address.clone(), recipient, amount, signature: None };
+                tx.sign(&secret_key);
                 let mut bc = blockchain.lock().unwrap();
                 bc.add_block(vec![tx.clone()], Some(server_addr.clone()));
 

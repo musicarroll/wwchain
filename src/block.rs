@@ -53,6 +53,7 @@ mod tests {
             sender: "a".into(),
             recipient: "b".into(),
             amount: 10,
+            signature: None,
         };
         let block = Block::new(1, 123, vec![tx.clone()], "prev".into(), Some("me".into()));
         assert_eq!(block.index, 1);
@@ -69,6 +70,7 @@ mod tests {
             sender: "x".into(),
             recipient: "y".into(),
             amount: 5,
+            signature: None,
         };
         let block = Block::new(2, 456, vec![tx], "prevhash".into(), None);
         let h1 = block.hash.clone();

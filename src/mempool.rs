@@ -25,7 +25,7 @@ mod tests {
     #[test]
     fn test_mempool_add_and_drain() {
         let mut mp = Mempool::new();
-        let tx = Transaction { sender: "a".into(), recipient: "b".into(), amount: 2 };
+        let tx = Transaction { sender: "a".into(), recipient: "b".into(), amount: 2, signature: None };
         mp.add_tx(tx.clone());
         assert_eq!(mp.pending.len(), 1);
         let drained = mp.drain();
