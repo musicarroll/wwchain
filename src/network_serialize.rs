@@ -137,8 +137,11 @@ pub async fn handle_client_with_chain(mut stream: TcpStream, blockchain: Arc<Mut
                     }
                     NetworkMessage::ChainRequest(requestor_addr) => {
                         println!("[SERIALIZED] Received ChainRequest from {}", requestor_addr);
-                        let chain = blockchain.lock().unwrap();
-                        let response = NetworkMessage::ChainResponse(chain.chain.clone());
+                        let chain_blocks = {
+                            let chain = blockchain.lock().unwrap();
+                            chain.chain.clone()
+                        };
+                        let response = NetworkMessage::ChainResponse(chain_blocks);
                         let _ = send_message(&requestor_addr, &response).await;
                     }
                     NetworkMessage::ChainResponse(their_chain) => {
