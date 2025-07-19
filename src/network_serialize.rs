@@ -326,7 +326,7 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
-    use secp256k1::Secp256k1;
+    use secp256k1::{Secp256k1, SecretKey, PublicKey};
     use rand::rngs::OsRng;
     use rand::RngCore;
     use hex;
