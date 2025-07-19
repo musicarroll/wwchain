@@ -57,3 +57,13 @@ Each node will print received messages and you can send transactions via the int
 
 Uncomment them in `Cargo.toml` when needed.
 
+
+## Setup for tests and documentation
+
+Run the helper script to ensure all crates are fetched, tests pass and docs are built:
+
+```bash
+./setup.sh
+```
+
+The script installs Rust with `rustup` if necessary, fetches dependencies, runs `cargo test` and generates documentation with `cargo doc`.
