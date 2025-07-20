@@ -1,7 +1,7 @@
 use std::fs::File;
-use std::io::{self, Read, Write, ErrorKind};
+use std::io::{self, ErrorKind, Read, Write};
 
-use crate::block::{Block};
+use crate::block::Block;
 use crate::blockchain::Blockchain;
 
 pub fn load_chain(path: &str) -> io::Result<Blockchain> {
@@ -26,8 +26,8 @@ pub fn save_chain(chain: &Blockchain, path: &str) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
     use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn load_chain_rejects_invalid() {

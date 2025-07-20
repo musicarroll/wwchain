@@ -1,6 +1,6 @@
-use serde::{Serialize, Deserialize};
-use sha2::{Sha256, Digest};
 use crate::transaction::Transaction;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Block {

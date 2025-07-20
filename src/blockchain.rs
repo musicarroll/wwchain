@@ -21,7 +21,9 @@ impl Blockchain {
             "0".to_string(),
             None, // <-- Genesis block has no sender_addr
         );
-        Blockchain { chain: vec![genesis_block] }
+        Blockchain {
+            chain: vec![genesis_block],
+        }
     }
 
     // Make this function accept sender_addr:
@@ -65,10 +67,10 @@ impl Blockchain {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use secp256k1::{Secp256k1, SecretKey, PublicKey};
+    use hex;
     use rand::rngs::OsRng;
     use rand::RngCore;
-    use hex;
+    use secp256k1::{PublicKey, Secp256k1, SecretKey};
 
     #[test]
     fn test_blockchain_new_creates_genesis() {
@@ -86,7 +88,12 @@ mod tests {
         rng.fill_bytes(&mut sk_bytes);
         let sk = SecretKey::from_slice(&sk_bytes).unwrap();
         let pk = PublicKey::from_secret_key(&secp, &sk);
-        let mut tx = Transaction { sender: hex::encode(pk.serialize()), recipient: "b".into(), amount: 1, signature: None };
+        let mut tx = Transaction {
+            sender: hex::encode(pk.serialize()),
+            recipient: "b".into(),
+            amount: 1,
+            signature: None,
+        };
         tx.sign(&sk);
         bc.add_block(vec![tx.clone()], Some("addr".into()));
         assert_eq!(bc.chain.len(), 2);
@@ -105,7 +112,12 @@ mod tests {
         rng.fill_bytes(&mut sk_bytes);
         let sk = SecretKey::from_slice(&sk_bytes).unwrap();
         let pk = PublicKey::from_secret_key(&secp, &sk);
-        let mut tx = Transaction { sender: hex::encode(pk.serialize()), recipient: "b".into(), amount: 2, signature: None };
+        let mut tx = Transaction {
+            sender: hex::encode(pk.serialize()),
+            recipient: "b".into(),
+            amount: 2,
+            signature: None,
+        };
         tx.sign(&sk);
         bc.add_block(vec![tx], Some("addr".into()));
         assert!(bc.is_valid_chain());

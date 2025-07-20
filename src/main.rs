@@ -1,23 +1,23 @@
-mod transaction;
 mod block;
 mod blockchain;
 mod mempool;
 mod network_serialize;
 mod peer;
 mod storage;
+mod transaction;
 
-use transaction::Transaction;
 use blockchain::Blockchain;
+use clap::Parser;
 use mempool::Mempool;
-use network_serialize::{NetworkMessage, start_server_with_chain, broadcast_message};
+use network_serialize::{broadcast_message, start_server_with_chain, NetworkMessage};
 use peer::PeerList;
-use storage::{load_chain, save_chain};
-use secp256k1::Secp256k1;
-use secp256k1::SecretKey;
-use secp256k1::PublicKey;
 use rand::rngs::OsRng;
 use rand::RngCore;
-use clap::Parser;
+use secp256k1::PublicKey;
+use secp256k1::Secp256k1;
+use secp256k1::SecretKey;
+use storage::{load_chain, save_chain};
+use transaction::Transaction;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -125,11 +125,14 @@ async fn main() {
         if let Err(e) = save_chain(&bc, &chain_file) {
             eprintln!("[STORAGE] Failed to save chain: {}", e);
         }
-
     }
 
     // --- Broadcast a greeting and a transaction to all peers ---
-    broadcast_message(peers.clone(), &NetworkMessage::Text(format!("Hello from {}!", node_name))).await;
+    broadcast_message(
+        peers.clone(),
+        &NetworkMessage::Text(format!("Hello from {}!", node_name)),
+    )
+    .await;
     let mut tx = Transaction {
         sender: my_address.clone(),
         recipient: "bob".to_string(),
@@ -156,7 +159,9 @@ async fn main() {
             continue;
         }
         let parts: Vec<_> = line.trim().split_whitespace().collect();
-        if parts.is_empty() { continue; }
+        if parts.is_empty() {
+            continue;
+        }
         match parts[0] {
             "tx" if parts.len() == 3 => {
                 let recipient = parts[1].to_string();

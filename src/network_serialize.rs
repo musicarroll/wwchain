@@ -1,23 +1,23 @@
 #[cfg(feature = "sync")]
-use std::net::{TcpListener, TcpStream};
-#[cfg(feature = "sync")]
 use std::io::{Read, Write};
+#[cfg(feature = "sync")]
+use std::net::{TcpListener, TcpStream};
 #[cfg(feature = "sync")]
 use std::thread;
 
 #[cfg(not(feature = "sync"))]
-use tokio::net::{TcpListener, TcpStream};
-#[cfg(not(feature = "sync"))]
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+#[cfg(not(feature = "sync"))]
+use tokio::net::{TcpListener, TcpStream};
 #[cfg(not(feature = "sync"))]
 use tokio::task;
 
-use std::io;
-use serde::{Serialize, Deserialize};
-use crate::transaction::Transaction;
 use crate::block::Block;
 use crate::blockchain::Blockchain;
 use crate::peer::PeerList;
+use crate::transaction::Transaction;
+use serde::{Deserialize, Serialize};
+use std::io;
 use std::sync::{Arc, Mutex};
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -25,8 +25,8 @@ pub enum NetworkMessage {
     Transaction(Transaction),
     Block(Block),
     Text(String),
-    ChainRequest(String),         // requesting node's address
-    ChainResponse(Vec<Block>),    // the entire chain
+    ChainRequest(String),      // requesting node's address
+    ChainResponse(Vec<Block>), // the entire chain
 }
 
 impl NetworkMessage {
@@ -65,7 +65,12 @@ pub fn handle_chain_response(local_chain: &mut Blockchain, their_chain: Vec<Bloc
 
 // ---- Handler expects Arc<Mutex<Blockchain>> and Arc<PeerList> ----
 #[cfg(feature = "sync")]
-pub fn handle_client_with_chain(mut stream: TcpStream, blockchain: Arc<Mutex<Blockchain>>, peers: Arc<PeerList>, my_addr: String) {
+pub fn handle_client_with_chain(
+    mut stream: TcpStream,
+    blockchain: Arc<Mutex<Blockchain>>,
+    peers: Arc<PeerList>,
+    my_addr: String,
+) {
     let mut buffer = [0; 4096];
     match stream.read(&mut buffer) {
         Ok(size) => {
@@ -78,7 +83,7 @@ pub fn handle_client_with_chain(mut stream: TcpStream, blockchain: Arc<Mutex<Blo
                         } else {
                             // You may wish to add to mempool here
                         }
-                    },
+                    }
                     NetworkMessage::Block(block) => {
                         println!("[SERIALIZED] Received Block: {:?}", block);
                         if !block.transactions.iter().all(|tx| tx.verify()) {
@@ -101,16 +106,23 @@ pub fn handle_client_with_chain(mut stream: TcpStream, blockchain: Arc<Mutex<Blo
                         };
                         if block.index > local_tip {
                             if let Some(sender_addr) = block.sender_addr.clone() {
-                                println!("[RECONCILE] Attempting to reconcile with block sender: {}", sender_addr);
+                                println!(
+                                    "[RECONCILE] Attempting to reconcile with block sender: {}",
+                                    sender_addr
+                                );
                                 drop(chain); // unlock before net IO
-                                request_chain_and_reconcile(&sender_addr, blockchain.clone(), &my_addr);
+                                request_chain_and_reconcile(
+                                    &sender_addr,
+                                    blockchain.clone(),
+                                    &my_addr,
+                                );
                             } else {
                                 println!("[RECONCILE] Received block with no sender_addr!");
                             }
                             return;
                         }
                         // Optionally: append if valid and next block
-                    },
+                    }
                     NetworkMessage::ChainRequest(requestor_addr) => {
                         println!("[SERIALIZED] Received ChainRequest from {}", requestor_addr);
                         let chain = match blockchain.lock() {
@@ -122,9 +134,12 @@ pub fn handle_client_with_chain(mut stream: TcpStream, blockchain: Arc<Mutex<Blo
                         };
                         let response = NetworkMessage::ChainResponse(chain.chain.clone());
                         let _ = send_message(&requestor_addr, &response);
-                    },
+                    }
                     NetworkMessage::ChainResponse(their_chain) => {
-                        println!("[SERIALIZED] Received ChainResponse: {} blocks", their_chain.len());
+                        println!(
+                            "[SERIALIZED] Received ChainResponse: {} blocks",
+                            their_chain.len()
+                        );
                         let mut chain = match blockchain.lock() {
                             Ok(c) => c,
                             Err(e) => {
@@ -133,7 +148,7 @@ pub fn handle_client_with_chain(mut stream: TcpStream, blockchain: Arc<Mutex<Blo
                             }
                         };
                         handle_chain_response(&mut chain, their_chain);
-                    },
+                    }
                     NetworkMessage::Text(s) => println!("[SERIALIZED] Received Text: {}", s),
                 }
                 let response = b"OK (parsed NetworkMessage)\n";
@@ -141,7 +156,10 @@ pub fn handle_client_with_chain(mut stream: TcpStream, blockchain: Arc<Mutex<Blo
                     eprintln!("Failed to write response: {}", e);
                 }
             } else {
-                println!("[SERIALIZED] Received (unparsed): {}", String::from_utf8_lossy(&buffer[..size]));
+                println!(
+                    "[SERIALIZED] Received (unparsed): {}",
+                    String::from_utf8_lossy(&buffer[..size])
+                );
                 let response = b"Unrecognized data\n";
                 if let Err(e) = stream.write_all(response) {
                     eprintln!("Failed to write response: {}", e);
@@ -153,7 +171,12 @@ pub fn handle_client_with_chain(mut stream: TcpStream, blockchain: Arc<Mutex<Blo
 }
 
 #[cfg(not(feature = "sync"))]
-pub async fn handle_client_with_chain(mut stream: TcpStream, blockchain: Arc<Mutex<Blockchain>>, peers: Arc<PeerList>, my_addr: String) {
+pub async fn handle_client_with_chain(
+    mut stream: TcpStream,
+    blockchain: Arc<Mutex<Blockchain>>,
+    peers: Arc<PeerList>,
+    my_addr: String,
+) {
     let mut buffer = [0u8; 4096];
     match stream.read(&mut buffer).await {
         Ok(size) => {
@@ -189,8 +212,16 @@ pub async fn handle_client_with_chain(mut stream: TcpStream, blockchain: Arc<Mut
                         };
                         if block.index > local_tip {
                             if let Some(sender_addr) = block.sender_addr.clone() {
-                                println!("[RECONCILE] Attempting to reconcile with block sender: {}", sender_addr);
-                                request_chain_and_reconcile(&sender_addr, blockchain.clone(), &my_addr).await;
+                                println!(
+                                    "[RECONCILE] Attempting to reconcile with block sender: {}",
+                                    sender_addr
+                                );
+                                request_chain_and_reconcile(
+                                    &sender_addr,
+                                    blockchain.clone(),
+                                    &my_addr,
+                                )
+                                .await;
                             } else {
                                 println!("[RECONCILE] Received block with no sender_addr!");
                             }
@@ -213,7 +244,10 @@ pub async fn handle_client_with_chain(mut stream: TcpStream, blockchain: Arc<Mut
                         let _ = send_message(&requestor_addr, &response).await;
                     }
                     NetworkMessage::ChainResponse(their_chain) => {
-                        println!("[SERIALIZED] Received ChainResponse: {} blocks", their_chain.len());
+                        println!(
+                            "[SERIALIZED] Received ChainResponse: {} blocks",
+                            their_chain.len()
+                        );
                         let mut chain = match blockchain.lock() {
                             Ok(c) => c,
                             Err(e) => {
@@ -228,7 +262,10 @@ pub async fn handle_client_with_chain(mut stream: TcpStream, blockchain: Arc<Mut
                 let response = b"OK (parsed NetworkMessage)\n";
                 let _ = stream.write_all(response).await;
             } else {
-                println!("[SERIALIZED] Received (unparsed): {}", String::from_utf8_lossy(&buffer[..size]));
+                println!(
+                    "[SERIALIZED] Received (unparsed): {}",
+                    String::from_utf8_lossy(&buffer[..size])
+                );
                 let response = b"Unrecognized data\n";
                 let _ = stream.write_all(response).await;
             }
@@ -238,7 +275,12 @@ pub async fn handle_client_with_chain(mut stream: TcpStream, blockchain: Arc<Mut
 }
 
 #[cfg(feature = "sync")]
-pub fn start_server_with_chain(addr: &str, blockchain: Arc<Mutex<Blockchain>>, peers: Arc<PeerList>, my_addr: String) -> io::Result<()> {
+pub fn start_server_with_chain(
+    addr: &str,
+    blockchain: Arc<Mutex<Blockchain>>,
+    peers: Arc<PeerList>,
+    my_addr: String,
+) -> io::Result<()> {
     let listener = TcpListener::bind(addr)?;
     println!("[SERIALIZED] Server listening on {}", addr);
     for stream in listener.incoming() {
@@ -256,7 +298,12 @@ pub fn start_server_with_chain(addr: &str, blockchain: Arc<Mutex<Blockchain>>, p
 }
 
 #[cfg(not(feature = "sync"))]
-pub async fn start_server_with_chain(addr: &str, blockchain: Arc<Mutex<Blockchain>>, peers: Arc<PeerList>, my_addr: String) -> io::Result<()> {
+pub async fn start_server_with_chain(
+    addr: &str,
+    blockchain: Arc<Mutex<Blockchain>>,
+    peers: Arc<PeerList>,
+    my_addr: String,
+) -> io::Result<()> {
     let listener = TcpListener::bind(addr).await?;
     println!("[SERIALIZED] Server listening on {}", addr);
     loop {
@@ -279,7 +326,10 @@ pub fn send_message(addr: &str, msg: &NetworkMessage) -> io::Result<()> {
     stream.write_all(&buf)?;
     let mut buffer = [0; 4096];
     let size = stream.read(&mut buffer)?;
-    println!("[SERIALIZED] Server responded: {}", String::from_utf8_lossy(&buffer[..size]));
+    println!(
+        "[SERIALIZED] Server responded: {}",
+        String::from_utf8_lossy(&buffer[..size])
+    );
     Ok(())
 }
 
@@ -290,7 +340,10 @@ pub async fn send_message(addr: &str, msg: &NetworkMessage) -> io::Result<()> {
     stream.write_all(&buf).await?;
     let mut buffer = [0u8; 4096];
     let size = stream.read(&mut buffer).await?;
-    println!("[SERIALIZED] Server responded: {}", String::from_utf8_lossy(&buffer[..size]));
+    println!(
+        "[SERIALIZED] Server responded: {}",
+        String::from_utf8_lossy(&buffer[..size])
+    );
     Ok(())
 }
 
@@ -312,7 +365,6 @@ pub async fn broadcast_message(peers: Arc<PeerList>, msg: &NetworkMessage) {
     }
 }
 
-
 /// Sends a ChainRequest to `addr` and waits for a ChainResponse.
 /// If a longer chain is received and valid, replaces `blockchain`.
 #[cfg(feature = "sync")]
@@ -333,7 +385,10 @@ pub fn request_chain_and_reconcile(addr: &str, blockchain: Arc<Mutex<Blockchain>
                 if let Ok(NetworkMessage::ChainResponse(their_chain)) =
                     serde_json::from_slice::<NetworkMessage>(&buffer[..size])
                 {
-                    println!("[RECONCILE] Received chain from peer: {} blocks", their_chain.len());
+                    println!(
+                        "[RECONCILE] Received chain from peer: {} blocks",
+                        their_chain.len()
+                    );
                     let mut chain = match blockchain.lock() {
                         Ok(c) => c,
                         Err(e) => {
@@ -343,7 +398,6 @@ pub fn request_chain_and_reconcile(addr: &str, blockchain: Arc<Mutex<Blockchain>
                     };
                     // super::handle_chain_response(&mut chain, their_chain);
                     handle_chain_response(&mut chain, their_chain);
-
                 } else {
                     eprintln!("[RECONCILE] Did not receive a valid ChainResponse.");
                 }
@@ -356,7 +410,11 @@ pub fn request_chain_and_reconcile(addr: &str, blockchain: Arc<Mutex<Blockchain>
 }
 
 #[cfg(not(feature = "sync"))]
-pub async fn request_chain_and_reconcile(addr: &str, blockchain: Arc<Mutex<Blockchain>>, my_addr: &str) {
+pub async fn request_chain_and_reconcile(
+    addr: &str,
+    blockchain: Arc<Mutex<Blockchain>>,
+    my_addr: &str,
+) {
     println!("[RECONCILE] Trying to connect to >{}<", addr);
     let req = NetworkMessage::ChainRequest(my_addr.to_string());
     if let Ok(mut stream) = TcpStream::connect(addr.trim()).await {
@@ -371,7 +429,10 @@ pub async fn request_chain_and_reconcile(addr: &str, blockchain: Arc<Mutex<Block
                 if let Ok(NetworkMessage::ChainResponse(their_chain)) =
                     serde_json::from_slice::<NetworkMessage>(&buffer[..size])
                 {
-                    println!("[RECONCILE] Received chain from peer: {} blocks", their_chain.len());
+                    println!(
+                        "[RECONCILE] Received chain from peer: {} blocks",
+                        their_chain.len()
+                    );
                     let mut chain = match blockchain.lock() {
                         Ok(c) => c,
                         Err(e) => {
@@ -394,12 +455,12 @@ pub async fn request_chain_and_reconcile(addr: &str, blockchain: Arc<Mutex<Block
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::time::Duration;
-    use secp256k1::{Secp256k1, SecretKey, PublicKey};
+    use hex;
     use rand::rngs::OsRng;
     use rand::RngCore;
-    use hex;
+    use secp256k1::{PublicKey, Secp256k1, SecretKey};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
 
     #[test]
     fn test_network_message_serialize_roundtrip() {
@@ -422,7 +483,12 @@ mod tests {
         rng.fill_bytes(&mut sk_bytes);
         let sk = SecretKey::from_slice(&sk_bytes).unwrap();
         let pk = PublicKey::from_secret_key(&secp, &sk);
-        let mut tx = Transaction { sender: hex::encode(pk.serialize()), recipient: "b".into(), amount: 1, signature: None };
+        let mut tx = Transaction {
+            sender: hex::encode(pk.serialize()),
+            recipient: "b".into(),
+            amount: 1,
+            signature: None,
+        };
         tx.sign(&sk);
         their.add_block(vec![tx], Some("addr".into()));
         handle_chain_response(&mut local, their.chain.clone());
@@ -478,7 +544,12 @@ mod tests {
         rng.fill_bytes(&mut sk_bytes);
         let sk = SecretKey::from_slice(&sk_bytes).unwrap();
         let pk = PublicKey::from_secret_key(&secp, &sk);
-        let mut tx = Transaction { sender: hex::encode(pk.serialize()), recipient: "y".into(), amount: 5, signature: None };
+        let mut tx = Transaction {
+            sender: hex::encode(pk.serialize()),
+            recipient: "y".into(),
+            amount: 5,
+            signature: None,
+        };
         tx.sign(&sk);
         their_chain.add_block(vec![tx], Some("addr".into()));
         tokio::spawn(async move {
@@ -588,4 +659,3 @@ mod tests {
         server2.abort();
     }
 }
-
