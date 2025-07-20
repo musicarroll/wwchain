@@ -145,7 +145,7 @@ mod tests {
         assert_eq!(bc.chain.len(), 2);
         let last = bc.chain.last().unwrap();
         assert_eq!(last.index, 1);
-        assert_eq!(last.transactions, vec![tx]);
+        assert_eq!(last.transactions, vec![tx.clone()]);
         assert_eq!(last.prev_hash, bc.chain[0].hash);
         assert_eq!(bc.balances.get(&tx.sender).copied(), Some(0));
         assert_eq!(bc.balances.get(&"b".to_string()).copied(), Some(1));
