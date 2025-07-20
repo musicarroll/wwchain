@@ -445,18 +445,24 @@ mod tests {
         peers1.add_peer(&addr2.to_string());
         peers2.add_peer(&addr1.to_string());
 
-        let server1 = tokio::spawn(start_server_with_chain(
-            &addr1.to_string(),
-            bc1.clone(),
-            peers1.clone(),
-            addr1.to_string(),
-        ));
-        let server2 = tokio::spawn(start_server_with_chain(
-            &addr2.to_string(),
-            bc2.clone(),
-            peers2.clone(),
-            addr2.to_string(),
-        ));
+        let addr1_str = addr1.to_string();
+        let addr2_str = addr2.to_string();
+
+        let bc1_clone = bc1.clone();
+        let peers1_clone = peers1.clone();
+        let server1 = tokio::spawn(async move {
+            start_server_with_chain(&addr1_str, bc1_clone, peers1_clone, addr1_str.clone())
+                .await
+                .unwrap();
+        });
+
+        let bc2_clone = bc2.clone();
+        let peers2_clone = peers2.clone();
+        let server2 = tokio::spawn(async move {
+            start_server_with_chain(&addr2_str, bc2_clone, peers2_clone, addr2_str.clone())
+                .await
+                .unwrap();
+        });
 
         // Give the servers time to start
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -478,7 +484,7 @@ mod tests {
 
         {
             let mut chain1 = bc1.lock().unwrap();
-            chain1.add_block(vec![tx.clone()], Some(addr1.to_string()));
+            chain1.add_block(vec![tx.clone()], Some(addr1_str.clone()));
         }
 
         let block = {
@@ -487,7 +493,7 @@ mod tests {
         };
 
         // Send the new block to node2
-        send_message(&addr2.to_string(), &NetworkMessage::Block(block))
+        send_message(&addr2_str, &NetworkMessage::Block(block))
             .await
             .unwrap();
 
