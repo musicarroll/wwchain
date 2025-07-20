@@ -19,8 +19,6 @@ use rand::rngs::OsRng;
 use rand::RngCore;
 use clap::Parser;
 
-const CHAIN_FILE: &str = "chain.json";
-
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
@@ -35,6 +33,10 @@ struct Cli {
     /// Comma separated peer addresses
     #[arg(long, default_value = "")]
     peers: String,
+
+    /// Path to the blockchain file
+    #[arg(long, default_value = "chain.json")]
+    chain_file: String,
 }
 use std::sync::{Arc, Mutex};
 
@@ -45,6 +47,7 @@ async fn main() {
     let port = cli.port;
     let node_name = cli.node_name;
     let peers_csv = cli.peers;
+    let chain_file = cli.chain_file;
     let server_addr = format!("127.0.0.1:{}", port);
 
     // --- Generate keypair for signing ---
@@ -65,9 +68,9 @@ async fn main() {
     }
 
     // --- Blockchain: shared (Arc<Mutex<_>> for reconciliation) ---
-    let initial_chain = match load_chain(CHAIN_FILE) {
+    let initial_chain = match load_chain(&chain_file) {
         Ok(chain) => {
-            println!("[STORAGE] Loaded chain from {}", CHAIN_FILE);
+            println!("[STORAGE] Loaded chain from {}", chain_file);
             chain
         }
         Err(_) => {
@@ -105,7 +108,7 @@ async fn main() {
     {
         let mut bc = blockchain.lock().unwrap();
         bc.add_block(txs_to_commit, Some(server_addr.clone()));
-        if let Err(e) = save_chain(&bc, CHAIN_FILE) {
+        if let Err(e) = save_chain(&bc, &chain_file) {
             eprintln!("[STORAGE] Failed to save chain: {}", e);
         }
 
@@ -143,7 +146,7 @@ async fn main() {
                 tx.sign(&secret_key);
                 let mut bc = blockchain.lock().unwrap();
                 bc.add_block(vec![tx.clone()], Some(server_addr.clone()));
-                if let Err(e) = save_chain(&bc, CHAIN_FILE) {
+                if let Err(e) = save_chain(&bc, &chain_file) {
                     eprintln!("[STORAGE] Failed to save chain: {}", e);
                 }
 

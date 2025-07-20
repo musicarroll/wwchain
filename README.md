@@ -15,12 +15,13 @@ This compiles the project and fetches all needed dependencies.
 Launch a node with optional arguments:
 
 ```bash
-cargo run -- --port <PORT> --node-name <NAME> --peers <PEER1,PEER2,...>
+cargo run -- --port <PORT> --node-name <NAME> --peers <PEER1,PEER2,...> --chain-file <FILE>
 ```
 
 - `--port` - TCP port to listen on (default: 6001).
 - `--node-name` - friendly name used in prompts (default: "node1").
 - `--peers` - comma separated list of peer addresses to connect to at startup.
+- `--chain-file` - file path where the blockchain is stored (default: "chain.json").
 
 Example starting a single node:
 
@@ -48,7 +49,7 @@ Each node will print received messages and you can send transactions via the int
 
 ## Chain persistence
 
-The blockchain is saved to a `chain.json` file in the current directory.  On startup the node will load this file if it exists.  Whenever a new block is added, the file is rewritten so the chain persists across runs.
+The blockchain is saved to a JSON file (default `chain.json`) in the current directory. You can override this path with the `--chain-file` argument. On startup the node will load this file if it exists. Whenever a new block is added, the file is rewritten so the chain persists across runs.
 
 ## Optional dependencies
 
