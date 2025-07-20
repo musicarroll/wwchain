@@ -55,7 +55,13 @@ async fn main() {
     let mut rng = OsRng;
     let mut sk_bytes = [0u8; 32];
     rng.fill_bytes(&mut sk_bytes);
-    let secret_key = SecretKey::from_slice(&sk_bytes).unwrap();
+    let secret_key = match SecretKey::from_slice(&sk_bytes) {
+        Ok(sk) => sk,
+        Err(e) => {
+            eprintln!("Failed to create secret key: {}", e);
+            return;
+        }
+    };
     let public_key = PublicKey::from_secret_key(&secp, &secret_key);
     let my_address = hex::encode(public_key.serialize());
 
@@ -87,7 +93,9 @@ async fn main() {
         let addr = server_addr.clone();
         let me = server_addr.clone();
         tokio::spawn(async move {
-            start_server_with_chain(&addr, bc, p, me).await.unwrap();
+            if let Err(e) = start_server_with_chain(&addr, bc, p, me).await {
+                eprintln!("Server error: {}", e);
+            }
         });
     }
 
@@ -106,7 +114,13 @@ async fn main() {
     mempool.add_tx(demo_tx);
     let txs_to_commit = mempool.drain();
     {
-        let mut bc = blockchain.lock().unwrap();
+        let mut bc = match blockchain.lock() {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("Blockchain lock poisoned: {}", e);
+                e.into_inner()
+            }
+        };
         bc.add_block(txs_to_commit, Some(server_addr.clone()));
         if let Err(e) = save_chain(&bc, &chain_file) {
             eprintln!("[STORAGE] Failed to save chain: {}", e);
@@ -133,9 +147,14 @@ async fn main() {
 
     loop {
         print!("{}> ", node_name);
-        io::stdout().flush().unwrap();
+        if let Err(e) = io::stdout().flush() {
+            eprintln!("Failed to flush stdout: {}", e);
+        }
         let mut line = String::new();
-        io::stdin().read_line(&mut line).unwrap();
+        if let Err(e) = io::stdin().read_line(&mut line) {
+            eprintln!("Failed to read line: {}", e);
+            continue;
+        }
         let parts: Vec<_> = line.trim().split_whitespace().collect();
         if parts.is_empty() { continue; }
         match parts[0] {
@@ -144,13 +163,25 @@ async fn main() {
                 let amount: u64 = parts[2].parse().unwrap_or(0);
                 let mut tx = Transaction { sender: my_address.clone(), recipient, amount, signature: None };
                 tx.sign(&secret_key);
-                let mut bc = blockchain.lock().unwrap();
+                let mut bc = match blockchain.lock() {
+                    Ok(b) => b,
+                    Err(e) => {
+                        eprintln!("Blockchain lock poisoned: {}", e);
+                        e.into_inner()
+                    }
+                };
                 bc.add_block(vec![tx.clone()], Some(server_addr.clone()));
                 if let Err(e) = save_chain(&bc, &chain_file) {
                     eprintln!("[STORAGE] Failed to save chain: {}", e);
                 }
 
-                let last_block = bc.chain.last().unwrap().clone();
+                let last_block = match bc.chain.last() {
+                    Some(b) => b.clone(),
+                    None => {
+                        eprintln!("Blockchain empty when broadcasting");
+                        continue;
+                    }
+                };
                 drop(bc); // unlock before broadcast
                 broadcast_message(peers.clone(), &NetworkMessage::Block(last_block)).await;
             }
