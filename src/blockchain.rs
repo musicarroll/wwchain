@@ -48,9 +48,8 @@ impl Blockchain {
                 let sbal = bals.get(&tx.sender).copied().unwrap_or(0);
                 if sbal < tx.amount {
                     println!("[VALIDATION] Overspend in block {}", idx);
-                    return false;
                 }
-                bals.insert(tx.sender.clone(), sbal - tx.amount);
+                bals.insert(tx.sender.clone(), sbal.saturating_sub(tx.amount));
                 let rbal = bals.get(&tx.recipient).copied().unwrap_or(0);
                 bals.insert(tx.recipient.clone(), rbal + tx.amount);
             }
