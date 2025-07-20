@@ -19,8 +19,10 @@ use crate::transaction::Transaction;
 use serde::{Deserialize, Serialize};
 use std::io;
 use std::sync::{Arc, Mutex};
+use sha2::{Digest, Sha256};
+use secp256k1::{ecdsa::Signature, Message, PublicKey, Secp256k1, SecretKey};
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum NetworkMessage {
     Transaction(Transaction),
     Block(Block),
@@ -38,6 +40,60 @@ impl NetworkMessage {
                 Vec::new()
             }
         }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct SignedMessage {
+    pub message: NetworkMessage,
+    pub signature: String,
+    pub pubkey: String,
+}
+
+impl SignedMessage {
+    pub fn new(message: NetworkMessage, sk: &SecretKey) -> Self {
+        let secp = Secp256k1::new();
+        let serialized = message.serialize();
+        let mut hasher = Sha256::new();
+        hasher.update(&serialized);
+        let digest = hasher.finalize();
+        let msg = Message::from_slice(&digest).expect("32 bytes");
+        let sig = secp.sign_ecdsa(&msg, sk);
+        let pubkey = PublicKey::from_secret_key(&secp, sk);
+        SignedMessage {
+            message,
+            signature: hex::encode(sig.serialize_compact()),
+            pubkey: hex::encode(pubkey.serialize()),
+        }
+    }
+
+    pub fn verify(&self) -> bool {
+        let sig_bytes = match hex::decode(&self.signature) {
+            Ok(b) => b,
+            Err(_) => return false,
+        };
+        let sig = match Signature::from_compact(&sig_bytes) {
+            Ok(s) => s,
+            Err(_) => return false,
+        };
+        let pub_bytes = match hex::decode(&self.pubkey) {
+            Ok(b) => b,
+            Err(_) => return false,
+        };
+        let pubkey = match PublicKey::from_slice(&pub_bytes) {
+            Ok(p) => p,
+            Err(_) => return false,
+        };
+        let secp = Secp256k1::verification_only();
+        let serialized = self.message.serialize();
+        let mut hasher = Sha256::new();
+        hasher.update(&serialized);
+        let digest = hasher.finalize();
+        let msg = match Message::from_slice(&digest) {
+            Ok(m) => m,
+            Err(_) => return false,
+        };
+        secp.verify_ecdsa(&msg, &sig, &pubkey).is_ok()
     }
 }
 
@@ -70,11 +126,17 @@ pub fn handle_client_with_chain(
     blockchain: Arc<Mutex<Blockchain>>,
     peers: Arc<PeerList>,
     my_addr: String,
+    sk: Arc<SecretKey>,
 ) {
     let mut buffer = [0; 4096];
     match stream.read(&mut buffer) {
         Ok(size) => {
-            if let Ok(msg) = serde_json::from_slice::<NetworkMessage>(&buffer[..size]) {
+            if let Ok(signed) = serde_json::from_slice::<SignedMessage>(&buffer[..size]) {
+                if !signed.verify() {
+                    eprintln!("[AUTH] Invalid signature from peer");
+                    return;
+                }
+                let msg = signed.message;
                 match msg {
                     NetworkMessage::Transaction(tx) => {
                         println!("[SERIALIZED] Received Transaction: {:?}", tx);
@@ -115,6 +177,7 @@ pub fn handle_client_with_chain(
                                     &sender_addr,
                                     blockchain.clone(),
                                     &my_addr,
+                                    &sk,
                                 );
                             } else {
                                 println!("[RECONCILE] Received block with no sender_addr!");
@@ -133,7 +196,7 @@ pub fn handle_client_with_chain(
                             }
                         };
                         let response = NetworkMessage::ChainResponse(chain.chain.clone());
-                        let _ = send_message(&requestor_addr, &response);
+                        let _ = send_message(&requestor_addr, &response, &sk);
                     }
                     NetworkMessage::ChainResponse(their_chain) => {
                         println!(
@@ -176,11 +239,17 @@ pub async fn handle_client_with_chain(
     blockchain: Arc<Mutex<Blockchain>>,
     peers: Arc<PeerList>,
     my_addr: String,
+    sk: Arc<SecretKey>,
 ) {
     let mut buffer = [0u8; 4096];
     match stream.read(&mut buffer).await {
         Ok(size) => {
-            if let Ok(msg) = serde_json::from_slice::<NetworkMessage>(&buffer[..size]) {
+            if let Ok(signed) = serde_json::from_slice::<SignedMessage>(&buffer[..size]) {
+                if !signed.verify() {
+                    eprintln!("[AUTH] Invalid signature from peer");
+                    return;
+                }
+                let msg = signed.message;
                 match msg {
                     NetworkMessage::Transaction(tx) => {
                         println!("[SERIALIZED] Received Transaction: {:?}", tx);
@@ -220,6 +289,7 @@ pub async fn handle_client_with_chain(
                                     &sender_addr,
                                     blockchain.clone(),
                                     &my_addr,
+                                    &sk,
                                 )
                                 .await;
                             } else {
@@ -241,7 +311,7 @@ pub async fn handle_client_with_chain(
                             chain.chain.clone()
                         };
                         let response = NetworkMessage::ChainResponse(chain_blocks);
-                        let _ = send_message(&requestor_addr, &response).await;
+                        let _ = send_message(&requestor_addr, &response, &sk).await;
                     }
                     NetworkMessage::ChainResponse(their_chain) => {
                         println!(
@@ -280,6 +350,7 @@ pub fn start_server_with_chain(
     blockchain: Arc<Mutex<Blockchain>>,
     peers: Arc<PeerList>,
     my_addr: String,
+    sk: Arc<SecretKey>,
 ) -> io::Result<()> {
     let listener = TcpListener::bind(addr)?;
     println!("[SERIALIZED] Server listening on {}", addr);
@@ -289,7 +360,8 @@ pub fn start_server_with_chain(
                 let bc = blockchain.clone();
                 let p = peers.clone();
                 let me = my_addr.clone();
-                thread::spawn(|| handle_client_with_chain(stream, bc, p, me));
+                let sk_clone = sk.clone();
+                thread::spawn(|| handle_client_with_chain(stream, bc, p, me, sk_clone));
             }
             Err(e) => eprintln!("Connection failed: {}", e),
         }
@@ -303,6 +375,7 @@ pub async fn start_server_with_chain(
     blockchain: Arc<Mutex<Blockchain>>,
     peers: Arc<PeerList>,
     my_addr: String,
+    sk: Arc<SecretKey>,
 ) -> io::Result<()> {
     let listener = TcpListener::bind(addr).await?;
     println!("[SERIALIZED] Server listening on {}", addr);
@@ -311,8 +384,9 @@ pub async fn start_server_with_chain(
         let bc = blockchain.clone();
         let p = peers.clone();
         let me = my_addr.clone();
+        let sk_clone = sk.clone();
         task::spawn(async move {
-            handle_client_with_chain(stream, bc, p, me).await;
+            handle_client_with_chain(stream, bc, p, me, sk_clone).await;
         });
     }
     #[allow(unreachable_code)]
@@ -320,9 +394,10 @@ pub async fn start_server_with_chain(
 }
 
 #[cfg(feature = "sync")]
-pub fn send_message(addr: &str, msg: &NetworkMessage) -> io::Result<()> {
+pub fn send_message(addr: &str, msg: &NetworkMessage, sk: &SecretKey) -> io::Result<()> {
     let mut stream = TcpStream::connect(addr)?;
-    let buf = msg.serialize();
+    let signed = SignedMessage::new(msg.clone(), sk);
+    let buf = serde_json::to_vec(&signed)?;
     stream.write_all(&buf)?;
     let mut buffer = [0; 4096];
     let size = stream.read(&mut buffer)?;
@@ -334,9 +409,10 @@ pub fn send_message(addr: &str, msg: &NetworkMessage) -> io::Result<()> {
 }
 
 #[cfg(not(feature = "sync"))]
-pub async fn send_message(addr: &str, msg: &NetworkMessage) -> io::Result<()> {
+pub async fn send_message(addr: &str, msg: &NetworkMessage, sk: &SecretKey) -> io::Result<()> {
     let mut stream = TcpStream::connect(addr).await?;
-    let buf = msg.serialize();
+    let signed = SignedMessage::new(msg.clone(), sk);
+    let buf = serde_json::to_vec(&signed)?;
     stream.write_all(&buf).await?;
     let mut buffer = [0u8; 4096];
     let size = stream.read(&mut buffer).await?;
@@ -348,18 +424,18 @@ pub async fn send_message(addr: &str, msg: &NetworkMessage) -> io::Result<()> {
 }
 
 #[cfg(feature = "sync")]
-pub fn broadcast_message(peers: Arc<PeerList>, msg: &NetworkMessage) {
+pub fn broadcast_message(peers: Arc<PeerList>, msg: &NetworkMessage, sk: &SecretKey) {
     for peer_addr in peers.all() {
-        if let Err(e) = send_message(&peer_addr, msg) {
+        if let Err(e) = send_message(&peer_addr, msg, sk) {
             eprintln!("Failed to send to {}: {}", peer_addr, e);
         }
     }
 }
 
 #[cfg(not(feature = "sync"))]
-pub async fn broadcast_message(peers: Arc<PeerList>, msg: &NetworkMessage) {
+pub async fn broadcast_message(peers: Arc<PeerList>, msg: &NetworkMessage, sk: &SecretKey) {
     for peer_addr in peers.all() {
-        if let Err(e) = send_message(&peer_addr, msg).await {
+        if let Err(e) = send_message(&peer_addr, msg, sk).await {
             eprintln!("Failed to send to {}: {}", peer_addr, e);
         }
     }
@@ -368,12 +444,13 @@ pub async fn broadcast_message(peers: Arc<PeerList>, msg: &NetworkMessage) {
 /// Sends a ChainRequest to `addr` and waits for a ChainResponse.
 /// If a longer chain is received and valid, replaces `blockchain`.
 #[cfg(feature = "sync")]
-pub fn request_chain_and_reconcile(addr: &str, blockchain: Arc<Mutex<Blockchain>>, my_addr: &str) {
+pub fn request_chain_and_reconcile(addr: &str, blockchain: Arc<Mutex<Blockchain>>, my_addr: &str, sk: &SecretKey) {
     // Send a ChainRequest
     println!("[RECONCILE] Trying to connect to >{}<", addr); // Diagnostic print
     let req = NetworkMessage::ChainRequest(my_addr.to_string());
     if let Ok(mut stream) = TcpStream::connect(addr.trim()) {
-        let req_buf = req.serialize();
+        let signed = SignedMessage::new(req, sk);
+        let req_buf = serde_json::to_vec(&signed).expect("serialize");
         if let Err(e) = stream.write_all(&req_buf) {
             eprintln!("[RECONCILE] Failed to send chain request: {}", e);
             return;
@@ -382,24 +459,29 @@ pub fn request_chain_and_reconcile(addr: &str, blockchain: Arc<Mutex<Blockchain>
         let mut buffer = [0; 65536];
         match stream.read(&mut buffer) {
             Ok(size) => {
-                if let Ok(NetworkMessage::ChainResponse(their_chain)) =
-                    serde_json::from_slice::<NetworkMessage>(&buffer[..size])
-                {
-                    println!(
-                        "[RECONCILE] Received chain from peer: {} blocks",
-                        their_chain.len()
-                    );
-                    let mut chain = match blockchain.lock() {
-                        Ok(c) => c,
-                        Err(e) => {
-                            eprintln!("Blockchain lock poisoned: {}", e);
-                            e.into_inner()
-                        }
-                    };
-                    // super::handle_chain_response(&mut chain, their_chain);
-                    handle_chain_response(&mut chain, their_chain);
+                if let Ok(signed) = serde_json::from_slice::<SignedMessage>(&buffer[..size]) {
+                    if !signed.verify() {
+                        eprintln!("[RECONCILE] Invalid signature in chain response");
+                        return;
+                    }
+                    if let NetworkMessage::ChainResponse(their_chain) = signed.message {
+                        println!(
+                            "[RECONCILE] Received chain from peer: {} blocks",
+                            their_chain.len()
+                        );
+                        let mut chain = match blockchain.lock() {
+                            Ok(c) => c,
+                            Err(e) => {
+                                eprintln!("Blockchain lock poisoned: {}", e);
+                                e.into_inner()
+                            }
+                        };
+                        handle_chain_response(&mut chain, their_chain);
+                    } else {
+                        eprintln!("[RECONCILE] Did not receive a ChainResponse message");
+                    }
                 } else {
-                    eprintln!("[RECONCILE] Did not receive a valid ChainResponse.");
+                    eprintln!("[RECONCILE] Failed to parse signed message");
                 }
             }
             Err(e) => eprintln!("[RECONCILE] Failed to read chain response: {}", e),
@@ -414,11 +496,13 @@ pub async fn request_chain_and_reconcile(
     addr: &str,
     blockchain: Arc<Mutex<Blockchain>>,
     my_addr: &str,
+    sk: &SecretKey,
 ) {
     println!("[RECONCILE] Trying to connect to >{}<", addr);
     let req = NetworkMessage::ChainRequest(my_addr.to_string());
     if let Ok(mut stream) = TcpStream::connect(addr.trim()).await {
-        let req_buf = req.serialize();
+        let signed = SignedMessage::new(req, sk);
+        let req_buf = serde_json::to_vec(&signed).expect("serialize");
         if let Err(e) = stream.write_all(&req_buf).await {
             eprintln!("[RECONCILE] Failed to send chain request: {}", e);
             return;
@@ -426,23 +510,29 @@ pub async fn request_chain_and_reconcile(
         let mut buffer = [0u8; 65536];
         match stream.read(&mut buffer).await {
             Ok(size) => {
-                if let Ok(NetworkMessage::ChainResponse(their_chain)) =
-                    serde_json::from_slice::<NetworkMessage>(&buffer[..size])
-                {
-                    println!(
-                        "[RECONCILE] Received chain from peer: {} blocks",
-                        their_chain.len()
-                    );
-                    let mut chain = match blockchain.lock() {
-                        Ok(c) => c,
-                        Err(e) => {
-                            eprintln!("Blockchain lock poisoned: {}", e);
-                            e.into_inner()
-                        }
-                    };
-                    handle_chain_response(&mut chain, their_chain);
+                if let Ok(signed) = serde_json::from_slice::<SignedMessage>(&buffer[..size]) {
+                    if !signed.verify() {
+                        eprintln!("[RECONCILE] Invalid signature in chain response");
+                        return;
+                    }
+                    if let NetworkMessage::ChainResponse(their_chain) = signed.message {
+                        println!(
+                            "[RECONCILE] Received chain from peer: {} blocks",
+                            their_chain.len()
+                        );
+                        let mut chain = match blockchain.lock() {
+                            Ok(c) => c,
+                            Err(e) => {
+                                eprintln!("Blockchain lock poisoned: {}", e);
+                                e.into_inner()
+                            }
+                        };
+                        handle_chain_response(&mut chain, their_chain);
+                    } else {
+                        eprintln!("[RECONCILE] Did not receive a ChainResponse message");
+                    }
                 } else {
-                    eprintln!("[RECONCILE] Did not receive a valid ChainResponse.");
+                    eprintln!("[RECONCILE] Failed to parse signed message");
                 }
             }
             Err(e) => eprintln!("[RECONCILE] Failed to read chain response: {}", e),
@@ -527,7 +617,14 @@ mod tests {
         let peers = Arc::new(PeerList::new());
         peers.add_peer(&addr1.to_string());
         peers.add_peer(&addr2.to_string());
-        broadcast_message(peers, &NetworkMessage::Text("hi".into())).await;
+
+        let secp = Secp256k1::new();
+        let mut rng = OsRng;
+        let mut sk_bytes = [0u8; 32];
+        rng.fill_bytes(&mut sk_bytes);
+        let sk = SecretKey::from_slice(&sk_bytes).unwrap();
+
+        broadcast_message(peers, &NetworkMessage::Text("hi".into()), &sk).await;
 
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(counter.load(Ordering::SeqCst), 2);
@@ -554,19 +651,23 @@ mod tests {
         tx.sign(&sk);
         their_chain.balances.insert(tx.sender.clone(), 5);
         their_chain.add_block(vec![tx], Some("addr".into()));
+        let sk_clone = sk.clone();
         tokio::spawn(async move {
             if let Ok((mut stream, _)) = listener.accept().await {
                 let mut buf = [0u8; 65536];
                 let size = stream.read(&mut buf).await.unwrap();
-                let _req: NetworkMessage = serde_json::from_slice(&buf[..size]).unwrap();
+                let signed_req: SignedMessage = serde_json::from_slice(&buf[..size]).unwrap();
+                let _req = signed_req.message;
                 let resp = NetworkMessage::ChainResponse(their_chain.chain.clone());
-                let resp_buf = resp.serialize();
+                let signed_resp = SignedMessage::new(resp, &sk_clone);
+                let resp_buf = serde_json::to_vec(&signed_resp).unwrap();
                 stream.write_all(&resp_buf).await.unwrap();
             }
         });
 
         let local = Arc::new(Mutex::new(Blockchain::new()));
-        request_chain_and_reconcile(&addr.to_string(), local.clone(), "client").await;
+        let client_sk = SecretKey::from_slice(&sk_bytes).unwrap();
+        request_chain_and_reconcile(&addr.to_string(), local.clone(), "client", &client_sk).await;
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(local.lock().unwrap().chain.len(), 2);
     }
@@ -596,8 +697,11 @@ mod tests {
         let server1_bc = bc1.clone();
         let server1_peers = peers1.clone();
         let addr1_my = addr1_str.clone();
+        let node1_sk = SecretKey::from_slice(&[1u8; 32]).unwrap();
+        let sk1_arc = Arc::new(node1_sk);
+        let server1_sk = sk1_arc.clone();
         let server1 = tokio::spawn(async move {
-            start_server_with_chain(&addr1_str, server1_bc, server1_peers, addr1_my)
+            start_server_with_chain(&addr1_str, server1_bc, server1_peers, addr1_my, server1_sk)
                 .await
                 .unwrap();
         });
@@ -606,8 +710,11 @@ mod tests {
         let server2_bc = bc2.clone();
         let server2_peers = peers2.clone();
         let addr2_my = addr2_str.clone();
+        let node2_sk = SecretKey::from_slice(&[2u8; 32]).unwrap();
+        let sk2_arc = Arc::new(node2_sk);
+        let server2_sk = sk2_arc.clone();
         let server2 = tokio::spawn(async move {
-            start_server_with_chain(&addr2_str, server2_bc, server2_peers, addr2_my)
+            start_server_with_chain(&addr2_str, server2_bc, server2_peers, addr2_my, server2_sk)
                 .await
                 .unwrap();
         });
@@ -642,7 +749,7 @@ mod tests {
         };
 
         // Send the new block to node2
-        send_message(&addr2.to_string(), &NetworkMessage::Block(block))
+        send_message(&addr2.to_string(), &NetworkMessage::Block(block), &sk1_arc)
             .await
             .unwrap();
 

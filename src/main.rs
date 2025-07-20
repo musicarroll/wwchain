@@ -92,8 +92,9 @@ async fn main() {
         let p = peers.clone();
         let addr = server_addr.clone();
         let me = server_addr.clone();
+        let sk = secret_key.clone();
         tokio::spawn(async move {
-            if let Err(e) = start_server_with_chain(&addr, bc, p, me).await {
+            if let Err(e) = start_server_with_chain(&addr, bc, p, me, Arc::new(sk)).await {
                 eprintln!("Server error: {}", e);
             }
         });
@@ -131,6 +132,7 @@ async fn main() {
     broadcast_message(
         peers.clone(),
         &NetworkMessage::Text(format!("Hello from {}!", node_name)),
+        &secret_key,
     )
     .await;
     let mut tx = Transaction {
@@ -140,7 +142,7 @@ async fn main() {
         signature: None,
     };
     tx.sign(&secret_key);
-    broadcast_message(peers.clone(), &NetworkMessage::Transaction(tx)).await;
+    broadcast_message(peers.clone(), &NetworkMessage::Transaction(tx), &secret_key).await;
 
     use std::io::{self, Write};
 
@@ -188,7 +190,7 @@ async fn main() {
                     }
                 };
                 drop(bc); // unlock before broadcast
-                broadcast_message(peers.clone(), &NetworkMessage::Block(last_block)).await;
+                broadcast_message(peers.clone(), &NetworkMessage::Block(last_block), &secret_key).await;
             }
             "add" if parts.len() == 2 => {
                 let peer_addr = parts[1];
