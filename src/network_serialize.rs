@@ -427,5 +427,84 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(local.lock().unwrap().chain.len(), 2);
     }
+
+    #[tokio::test]
+    async fn test_block_propagation_between_servers() {
+        // Acquire two ephemeral ports then drop the listeners so the ports can be reused
+        let temp1 = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr1 = temp1.local_addr().unwrap();
+        drop(temp1);
+        let temp2 = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr2 = temp2.local_addr().unwrap();
+        drop(temp2);
+
+        let bc1 = Arc::new(Mutex::new(Blockchain::new()));
+        let bc2 = Arc::new(Mutex::new(Blockchain::new()));
+        let peers1 = Arc::new(PeerList::new());
+        let peers2 = Arc::new(PeerList::new());
+        peers1.add_peer(&addr2.to_string());
+        peers2.add_peer(&addr1.to_string());
+
+        let server1 = tokio::spawn(start_server_with_chain(
+            &addr1.to_string(),
+            bc1.clone(),
+            peers1.clone(),
+            addr1.to_string(),
+        ));
+        let server2 = tokio::spawn(start_server_with_chain(
+            &addr2.to_string(),
+            bc2.clone(),
+            peers2.clone(),
+            addr2.to_string(),
+        ));
+
+        // Give the servers time to start
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // Create a signed transaction and add a block on node1
+        let secp = Secp256k1::new();
+        let mut rng = OsRng;
+        let mut sk_bytes = [0u8; 32];
+        rng.fill_bytes(&mut sk_bytes);
+        let sk = SecretKey::from_slice(&sk_bytes).unwrap();
+        let pk = PublicKey::from_secret_key(&secp, &sk);
+        let mut tx = Transaction {
+            sender: hex::encode(pk.serialize()),
+            recipient: "b".into(),
+            amount: 3,
+            signature: None,
+        };
+        tx.sign(&sk);
+
+        {
+            let mut chain1 = bc1.lock().unwrap();
+            chain1.add_block(vec![tx.clone()], Some(addr1.to_string()));
+        }
+
+        let block = {
+            let chain1 = bc1.lock().unwrap();
+            chain1.chain.last().unwrap().clone()
+        };
+
+        // Send the new block to node2
+        send_message(&addr2.to_string(), &NetworkMessage::Block(block))
+            .await
+            .unwrap();
+
+        // Wait until node2 has reconciled and has two blocks
+        let start = std::time::Instant::now();
+        while start.elapsed() < Duration::from_secs(2) {
+            if bc2.lock().unwrap().chain.len() == 2 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+
+        assert_eq!(bc2.lock().unwrap().chain.len(), 2);
+
+        // Stop servers
+        server1.abort();
+        server2.abort();
+    }
 }
 
