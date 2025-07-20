@@ -73,7 +73,9 @@ Run the helper script to ensure all crates are fetched, tests pass and docs are 
 ./setup.sh
 ```
 
-The script installs Rust with `rustup` if necessary, fetches dependencies, runs `cargo test` and generates documentation with `cargo doc`.
+The script installs Rust with `rustup` if necessary, fetches dependencies,
+formats the code with `cargo fmt --all`, runs `cargo test` and generates
+documentation with `cargo doc`.
 
 ## Security/Disclaimer
 
