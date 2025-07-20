@@ -28,6 +28,9 @@ fi
 # still be used.
 cargo fetch || echo "cargo fetch failed - continuing with any cached crates"
 
+# Format the code
+cargo fmt --all || echo "cargo fmt failed"
+
 # Run the project tests
 cargo test --offline || echo "Tests skipped due to missing crates"
 
