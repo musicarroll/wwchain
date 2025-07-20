@@ -67,3 +67,7 @@ Run the helper script to ensure all crates are fetched, tests pass and docs are 
 ```
 
 The script installs Rust with `rustup` if necessary, fetches dependencies, runs `cargo test` and generates documentation with `cargo doc`.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
