@@ -31,7 +31,13 @@ pub enum NetworkMessage {
 
 impl NetworkMessage {
     pub fn serialize(&self) -> Vec<u8> {
-        serde_json::to_vec(self).unwrap()
+        match serde_json::to_vec(self) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("Failed to serialize network message: {}", e);
+                Vec::new()
+            }
+        }
     }
 }
 
@@ -79,8 +85,20 @@ pub fn handle_client_with_chain(mut stream: TcpStream, blockchain: Arc<Mutex<Blo
                             eprintln!("[SERIALIZED] Block contains invalid transaction");
                             return;
                         }
-                        let mut chain = blockchain.lock().unwrap();
-                        let local_tip = chain.chain.last().unwrap().index;
+                        let mut chain = match blockchain.lock() {
+                            Ok(c) => c,
+                            Err(e) => {
+                                eprintln!("Blockchain lock poisoned: {}", e);
+                                e.into_inner()
+                            }
+                        };
+                        let local_tip = match chain.chain.last() {
+                            Some(b) => b.index,
+                            None => {
+                                eprintln!("Received block but local chain empty");
+                                return;
+                            }
+                        };
                         if block.index > local_tip {
                             if let Some(sender_addr) = block.sender_addr.clone() {
                                 println!("[RECONCILE] Attempting to reconcile with block sender: {}", sender_addr);
@@ -95,23 +113,39 @@ pub fn handle_client_with_chain(mut stream: TcpStream, blockchain: Arc<Mutex<Blo
                     },
                     NetworkMessage::ChainRequest(requestor_addr) => {
                         println!("[SERIALIZED] Received ChainRequest from {}", requestor_addr);
-                        let chain = blockchain.lock().unwrap();
+                        let chain = match blockchain.lock() {
+                            Ok(c) => c,
+                            Err(e) => {
+                                eprintln!("Blockchain lock poisoned: {}", e);
+                                e.into_inner()
+                            }
+                        };
                         let response = NetworkMessage::ChainResponse(chain.chain.clone());
                         let _ = send_message(&requestor_addr, &response);
                     },
                     NetworkMessage::ChainResponse(their_chain) => {
                         println!("[SERIALIZED] Received ChainResponse: {} blocks", their_chain.len());
-                        let mut chain = blockchain.lock().unwrap();
+                        let mut chain = match blockchain.lock() {
+                            Ok(c) => c,
+                            Err(e) => {
+                                eprintln!("Blockchain lock poisoned: {}", e);
+                                e.into_inner()
+                            }
+                        };
                         handle_chain_response(&mut chain, their_chain);
                     },
                     NetworkMessage::Text(s) => println!("[SERIALIZED] Received Text: {}", s),
                 }
                 let response = b"OK (parsed NetworkMessage)\n";
-                stream.write_all(response).unwrap();
+                if let Err(e) = stream.write_all(response) {
+                    eprintln!("Failed to write response: {}", e);
+                }
             } else {
                 println!("[SERIALIZED] Received (unparsed): {}", String::from_utf8_lossy(&buffer[..size]));
                 let response = b"Unrecognized data\n";
-                stream.write_all(response).unwrap();
+                if let Err(e) = stream.write_all(response) {
+                    eprintln!("Failed to write response: {}", e);
+                }
             }
         }
         Err(e) => eprintln!("Error reading stream: {}", e),
@@ -138,8 +172,20 @@ pub async fn handle_client_with_chain(mut stream: TcpStream, blockchain: Arc<Mut
                             return;
                         }
                         let local_tip = {
-                            let chain = blockchain.lock().unwrap();
-                            chain.chain.last().unwrap().index
+                            let chain = match blockchain.lock() {
+                                Ok(c) => c,
+                                Err(e) => {
+                                    eprintln!("Blockchain lock poisoned: {}", e);
+                                    e.into_inner()
+                                }
+                            };
+                            match chain.chain.last() {
+                                Some(b) => b.index,
+                                None => {
+                                    eprintln!("Received block but local chain empty");
+                                    return;
+                                }
+                            }
                         };
                         if block.index > local_tip {
                             if let Some(sender_addr) = block.sender_addr.clone() {
@@ -154,7 +200,13 @@ pub async fn handle_client_with_chain(mut stream: TcpStream, blockchain: Arc<Mut
                     NetworkMessage::ChainRequest(requestor_addr) => {
                         println!("[SERIALIZED] Received ChainRequest from {}", requestor_addr);
                         let chain_blocks = {
-                            let chain = blockchain.lock().unwrap();
+                            let chain = match blockchain.lock() {
+                                Ok(c) => c,
+                                Err(e) => {
+                                    eprintln!("Blockchain lock poisoned: {}", e);
+                                    e.into_inner()
+                                }
+                            };
                             chain.chain.clone()
                         };
                         let response = NetworkMessage::ChainResponse(chain_blocks);
@@ -162,7 +214,13 @@ pub async fn handle_client_with_chain(mut stream: TcpStream, blockchain: Arc<Mut
                     }
                     NetworkMessage::ChainResponse(their_chain) => {
                         println!("[SERIALIZED] Received ChainResponse: {} blocks", their_chain.len());
-                        let mut chain = blockchain.lock().unwrap();
+                        let mut chain = match blockchain.lock() {
+                            Ok(c) => c,
+                            Err(e) => {
+                                eprintln!("Blockchain lock poisoned: {}", e);
+                                e.into_inner()
+                            }
+                        };
                         handle_chain_response(&mut chain, their_chain);
                     }
                     NetworkMessage::Text(s) => println!("[SERIALIZED] Received Text: {}", s),
@@ -276,7 +334,13 @@ pub fn request_chain_and_reconcile(addr: &str, blockchain: Arc<Mutex<Blockchain>
                     serde_json::from_slice::<NetworkMessage>(&buffer[..size])
                 {
                     println!("[RECONCILE] Received chain from peer: {} blocks", their_chain.len());
-                    let mut chain = blockchain.lock().unwrap();
+                    let mut chain = match blockchain.lock() {
+                        Ok(c) => c,
+                        Err(e) => {
+                            eprintln!("Blockchain lock poisoned: {}", e);
+                            e.into_inner()
+                        }
+                    };
                     // super::handle_chain_response(&mut chain, their_chain);
                     handle_chain_response(&mut chain, their_chain);
 
@@ -308,7 +372,13 @@ pub async fn request_chain_and_reconcile(addr: &str, blockchain: Arc<Mutex<Block
                     serde_json::from_slice::<NetworkMessage>(&buffer[..size])
                 {
                     println!("[RECONCILE] Received chain from peer: {} blocks", their_chain.len());
-                    let mut chain = blockchain.lock().unwrap();
+                    let mut chain = match blockchain.lock() {
+                        Ok(c) => c,
+                        Err(e) => {
+                            eprintln!("Blockchain lock poisoned: {}", e);
+                            e.into_inner()
+                        }
+                    };
                     handle_chain_response(&mut chain, their_chain);
                 } else {
                     eprintln!("[RECONCILE] Did not receive a valid ChainResponse.");

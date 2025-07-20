@@ -25,7 +25,13 @@ impl Transaction {
 
     pub fn sign(&mut self, sk: &SecretKey) {
         let secp = Secp256k1::new();
-        let msg = Message::from_slice(&self.message_bytes()).expect("32 bytes");
+        let msg = match Message::from_slice(&self.message_bytes()) {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!("Failed to create signing message: {}", e);
+                return;
+            }
+        };
         let sig = secp.sign_ecdsa(&msg, sk);
         self.signature = Some(hex::encode(sig.serialize_compact()));
     }
@@ -52,7 +58,10 @@ impl Transaction {
             Err(_) => return false,
         };
         let secp = Secp256k1::verification_only();
-        let msg = Message::from_slice(&self.message_bytes()).expect("32 bytes");
+        let msg = match Message::from_slice(&self.message_bytes()) {
+            Ok(m) => m,
+            Err(_) => return false,
+        };
         secp.verify_ecdsa(&msg, &sig, &pubkey).is_ok()
     }
 }
