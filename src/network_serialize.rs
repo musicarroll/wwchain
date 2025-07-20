@@ -445,18 +445,29 @@ mod tests {
         peers1.add_peer(&addr2.to_string());
         peers2.add_peer(&addr1.to_string());
 
-        let server1 = tokio::spawn(start_server_with_chain(
-            &addr1.to_string(),
-            bc1.clone(),
-            peers1.clone(),
-            addr1.to_string(),
-        ));
-        let server2 = tokio::spawn(start_server_with_chain(
-            &addr2.to_string(),
-            bc2.clone(),
-            peers2.clone(),
-            addr2.to_string(),
-        ));
+        // Spawn the two servers in background tasks. The address strings
+        // must be owned and moved into the async blocks so the references
+        // used by `start_server_with_chain` live for the `'static` lifetime
+        // required by `tokio::spawn`.
+        let addr1_str = addr1.to_string();
+        let server1_bc = bc1.clone();
+        let server1_peers = peers1.clone();
+        let addr1_my = addr1_str.clone();
+        let server1 = tokio::spawn(async move {
+            start_server_with_chain(&addr1_str, server1_bc, server1_peers, addr1_my)
+                .await
+                .unwrap();
+        });
+
+        let addr2_str = addr2.to_string();
+        let server2_bc = bc2.clone();
+        let server2_peers = peers2.clone();
+        let addr2_my = addr2_str.clone();
+        let server2 = tokio::spawn(async move {
+            start_server_with_chain(&addr2_str, server2_bc, server2_peers, addr2_my)
+                .await
+                .unwrap();
+        });
 
         // Give the servers time to start
         tokio::time::sleep(Duration::from_millis(100)).await;
