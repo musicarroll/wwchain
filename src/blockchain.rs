@@ -1,9 +1,12 @@
 use crate::block::Block;
 use crate::transaction::Transaction;
+use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[derive(Clone)]
 pub struct Blockchain {
     pub chain: Vec<Block>,
+    pub balances: HashMap<String, u64>,
 }
 
 impl Blockchain {
@@ -21,9 +24,39 @@ impl Blockchain {
             "0".to_string(),
             None, // <-- Genesis block has no sender_addr
         );
-        Blockchain {
+        let mut bc = Blockchain {
             chain: vec![genesis_block],
+            balances: HashMap::new(),
+        };
+        bc.recompute_balances();
+        bc
+    }
+
+    pub fn recompute_balances(&mut self) -> bool {
+        let mut bals = HashMap::new();
+        for (idx, block) in self.chain.iter().enumerate() {
+            for tx in &block.transactions {
+                if idx != 0 && !tx.verify() {
+                    println!("[VALIDATION] Invalid tx signature in block {}", idx);
+                    return false;
+                }
+                if idx == 0 {
+                    let rbal = bals.get(&tx.recipient).copied().unwrap_or(0);
+                    bals.insert(tx.recipient.clone(), rbal + tx.amount);
+                    continue;
+                }
+                let sbal = bals.get(&tx.sender).copied().unwrap_or(0);
+                if sbal < tx.amount {
+                    println!("[VALIDATION] Overspend in block {}", idx);
+                    return false;
+                }
+                bals.insert(tx.sender.clone(), sbal - tx.amount);
+                let rbal = bals.get(&tx.recipient).copied().unwrap_or(0);
+                bals.insert(tx.recipient.clone(), rbal + tx.amount);
+            }
         }
+        self.balances = bals;
+        true
     }
 
     // Make this function accept sender_addr:
@@ -31,6 +64,17 @@ impl Blockchain {
         if !transactions.iter().all(|tx| tx.verify()) {
             println!("[BLOCKCHAIN] Rejected block with invalid transaction signature");
             return;
+        }
+        let mut temp_balances = self.balances.clone();
+        for tx in &transactions {
+            let sbal = temp_balances.get(&tx.sender).copied().unwrap_or(0);
+            if sbal < tx.amount {
+                println!("[BLOCKCHAIN] Rejected block - overspend by {}", tx.sender);
+                return;
+            }
+            temp_balances.insert(tx.sender.clone(), sbal - tx.amount);
+            let rbal = temp_balances.get(&tx.recipient).copied().unwrap_or(0);
+            temp_balances.insert(tx.recipient.clone(), rbal + tx.amount);
         }
         let last_block = self.chain.last().unwrap();
         let index = last_block.index + 1;
@@ -41,6 +85,7 @@ impl Blockchain {
         let prev_hash = last_block.hash.clone();
         let new_block = Block::new(index, timestamp, transactions, prev_hash, sender_addr);
         self.chain.push(new_block);
+        self.balances = temp_balances;
     }
 
     pub fn is_valid_chain(&self) -> bool {
@@ -60,7 +105,8 @@ impl Blockchain {
                 return false;
             }
         }
-        true
+        let mut tmp = self.clone();
+        tmp.recompute_balances()
     }
 }
 
@@ -101,6 +147,55 @@ mod tests {
         assert_eq!(last.index, 1);
         assert_eq!(last.transactions, vec![tx]);
         assert_eq!(last.prev_hash, bc.chain[0].hash);
+        assert_eq!(bc.balances.get(&tx.sender).copied(), Some(0));
+        assert_eq!(bc.balances.get(&"b".to_string()).copied(), Some(1));
+    }
+
+    #[test]
+    fn test_reject_overspend() {
+        let mut bc = Blockchain::new();
+        let secp = Secp256k1::new();
+        let mut rng = OsRng;
+        let mut sk_bytes = [0u8; 32];
+        rng.fill_bytes(&mut sk_bytes);
+        let sk = SecretKey::from_slice(&sk_bytes).unwrap();
+        let pk = PublicKey::from_secret_key(&secp, &sk);
+        let mut tx = Transaction {
+            sender: hex::encode(pk.serialize()),
+            recipient: "b".into(),
+            amount: 50,
+            signature: None,
+        };
+        tx.sign(&sk);
+        bc.add_block(vec![tx], Some("addr".into()));
+        assert_eq!(bc.chain.len(), 1); // rejected
+    }
+
+    #[test]
+    fn test_reject_double_spend_in_block() {
+        let mut bc = Blockchain::new();
+        let secp = Secp256k1::new();
+        let mut rng = OsRng;
+        let mut sk_bytes = [0u8; 32];
+        rng.fill_bytes(&mut sk_bytes);
+        let sk = SecretKey::from_slice(&sk_bytes).unwrap();
+        let pk = PublicKey::from_secret_key(&secp, &sk);
+        let mut tx1 = Transaction {
+            sender: hex::encode(pk.serialize()),
+            recipient: "b".into(),
+            amount: 60,
+            signature: None,
+        };
+        tx1.sign(&sk);
+        let mut tx2 = Transaction {
+            sender: hex::encode(pk.serialize()),
+            recipient: "c".into(),
+            amount: 60,
+            signature: None,
+        };
+        tx2.sign(&sk);
+        bc.add_block(vec![tx1, tx2], Some("addr".into()));
+        assert_eq!(bc.chain.len(), 1); // rejected
     }
 
     #[test]

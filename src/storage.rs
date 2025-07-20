@@ -9,10 +9,14 @@ pub fn load_chain(path: &str) -> io::Result<Blockchain> {
     let mut data = String::new();
     file.read_to_string(&mut data)?;
     let blocks: Vec<Block> = serde_json::from_str(&data)?;
-    let chain = Blockchain { chain: blocks };
+    let mut chain = Blockchain {
+        chain: blocks,
+        balances: std::collections::HashMap::new(),
+    };
     if !chain.is_valid_chain() {
         return Err(io::Error::new(ErrorKind::InvalidData, "invalid blockchain"));
     }
+    chain.recompute_balances();
     Ok(chain)
 }
 
