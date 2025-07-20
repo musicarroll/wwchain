@@ -75,6 +75,10 @@ Run the helper script to ensure all crates are fetched, tests pass and docs are 
 
 The script installs Rust with `rustup` if necessary, fetches dependencies, runs `cargo test` and generates documentation with `cargo doc`.
 
+## Security/Disclaimer
+
+This prototype is for learning and experimentation only. It has not been audited or hardened and should **not** be used to manage real cryptocurrency or any sensitive data.
+
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
