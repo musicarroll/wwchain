@@ -13,7 +13,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::task;
 
 use crate::block::Block;
-use crate::blockchain::Blockchain;
+use crate::blockchain::{Blockchain, DIFFICULTY_PREFIX};
 use crate::peer::PeerList;
 use crate::transaction::Transaction;
 use serde::{Deserialize, Serialize};
@@ -99,15 +99,25 @@ impl SignedMessage {
 
 // ---- Chain reconciliation helper ----
 pub fn handle_chain_response(local_chain: &mut Blockchain, their_chain: Vec<Block>) {
-    if their_chain.len() > local_chain.chain.len() {
+    if Blockchain::chain_work(&their_chain) > local_chain.total_work() {
         // Validate new chain
         let mut valid = true;
         for i in 1..their_chain.len() {
             let prev = &their_chain[i - 1];
             let curr = &their_chain[i];
-            if curr.prev_hash != prev.hash || curr.hash != curr.calculate_hash() {
+            if curr.prev_hash != prev.hash
+                || curr.hash != curr.calculate_hash()
+                || !curr.hash.starts_with(DIFFICULTY_PREFIX)
+            {
                 valid = false;
                 break;
+            }
+        }
+        if valid {
+            if their_chain[0].hash != their_chain[0].calculate_hash()
+                || !their_chain[0].hash.starts_with(DIFFICULTY_PREFIX)
+            {
+                valid = false;
             }
         }
         if valid {
