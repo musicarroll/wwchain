@@ -4,18 +4,22 @@ mod blockchain;
 mod mempool;
 mod network_serialize;
 mod peer;
+mod storage;
 
 use transaction::Transaction;
 use blockchain::Blockchain;
 use mempool::Mempool;
 use network_serialize::{NetworkMessage, start_server_with_chain, broadcast_message};
 use peer::PeerList;
+use storage::{load_chain, save_chain};
 use secp256k1::Secp256k1;
 use secp256k1::SecretKey;
 use secp256k1::PublicKey;
 use rand::rngs::OsRng;
 use rand::RngCore;
 use clap::Parser;
+
+const CHAIN_FILE: &str = "chain.json";
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -61,7 +65,17 @@ async fn main() {
     }
 
     // --- Blockchain: shared (Arc<Mutex<_>> for reconciliation) ---
-    let blockchain = Arc::new(Mutex::new(Blockchain::new()));
+    let initial_chain = match load_chain(CHAIN_FILE) {
+        Ok(chain) => {
+            println!("[STORAGE] Loaded chain from {}", CHAIN_FILE);
+            chain
+        }
+        Err(_) => {
+            println!("[STORAGE] Starting new chain");
+            Blockchain::new()
+        }
+    };
+    let blockchain = Arc::new(Mutex::new(initial_chain));
 
     // --- Start server in a background task ---
     {
@@ -91,6 +105,9 @@ async fn main() {
     {
         let mut bc = blockchain.lock().unwrap();
         bc.add_block(txs_to_commit, Some(server_addr.clone()));
+        if let Err(e) = save_chain(&bc, CHAIN_FILE) {
+            eprintln!("[STORAGE] Failed to save chain: {}", e);
+        }
 
     }
 
@@ -126,6 +143,9 @@ async fn main() {
                 tx.sign(&secret_key);
                 let mut bc = blockchain.lock().unwrap();
                 bc.add_block(vec![tx.clone()], Some(server_addr.clone()));
+                if let Err(e) = save_chain(&bc, CHAIN_FILE) {
+                    eprintln!("[STORAGE] Failed to save chain: {}", e);
+                }
 
                 let last_block = bc.chain.last().unwrap().clone();
                 drop(bc); // unlock before broadcast

@@ -46,6 +46,10 @@ cargo run -- --port 6002 --node-name node2 --peers 127.0.0.1:6001
 
 Each node will print received messages and you can send transactions via the interactive prompt.
 
+## Chain persistence
+
+The blockchain is saved to a `chain.json` file in the current directory.  On startup the node will load this file if it exists.  Whenever a new block is added, the file is rewritten so the chain persists across runs.
+
 ## Optional dependencies
 
 `Cargo.toml` includes commented dependencies for potential future features:
