@@ -10,6 +10,7 @@ pub struct Block {
     pub prev_hash: String,
     pub hash: String,
     pub sender_addr: Option<String>,
+    pub nonce: u64,
 }
 
 impl Block {
@@ -27,6 +28,7 @@ impl Block {
             prev_hash,
             hash: String::new(),
             sender_addr, // <-- Use the argument
+            nonce: 0,
         };
         block.hash = block.calculate_hash();
         block
@@ -40,6 +42,13 @@ impl Block {
         hasher.update(serialized);
         let result = hasher.finalize();
         hex::encode(result)
+    }
+
+    pub fn mine(&mut self, difficulty_prefix: &str) {
+        while !self.hash.starts_with(difficulty_prefix) {
+            self.nonce += 1;
+            self.hash = self.calculate_hash();
+        }
     }
 }
 
@@ -61,6 +70,7 @@ mod tests {
         assert_eq!(block.transactions, vec![tx]);
         assert_eq!(block.prev_hash, "prev");
         assert_eq!(block.sender_addr, Some("me".into()));
+        assert_eq!(block.nonce, 0);
         assert_eq!(block.hash, block.calculate_hash());
     }
 
@@ -76,5 +86,14 @@ mod tests {
         let h1 = block.hash.clone();
         let h2 = block.calculate_hash();
         assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn test_mine_sets_nonce_and_valid_hash() {
+        let tx = Transaction { sender: "x".into(), recipient: "y".into(), amount: 1, signature: None };
+        let mut block = Block::new(1, 1, vec![tx], "0".into(), None);
+        block.mine("00");
+        assert!(block.hash.starts_with("00"));
+        assert!(block.nonce > 0);
     }
 }

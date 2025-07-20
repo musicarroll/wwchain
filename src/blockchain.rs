@@ -3,6 +3,8 @@ use crate::transaction::Transaction;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+pub const DIFFICULTY_PREFIX: &str = "0000";
+
 #[derive(Clone)]
 pub struct Blockchain {
     pub chain: Vec<Block>,
@@ -17,13 +19,14 @@ impl Blockchain {
             amount: 100,
             signature: None,
         };
-        let genesis_block = Block::new(
+        let mut genesis_block = Block::new(
             0,
             0,
             vec![genesis_tx],
             "0".to_string(),
             None, // <-- Genesis block has no sender_addr
         );
+        genesis_block.mine(DIFFICULTY_PREFIX);
         let mut bc = Blockchain {
             chain: vec![genesis_block],
             balances: HashMap::new(),
@@ -58,6 +61,17 @@ impl Blockchain {
         true
     }
 
+    pub(crate) fn chain_work(chain: &[Block]) -> usize {
+        chain
+            .iter()
+            .map(|b| b.hash.chars().take_while(|c| *c == '0').count())
+            .sum()
+    }
+
+    pub fn total_work(&self) -> usize {
+        Self::chain_work(&self.chain)
+    }
+
     // Make this function accept sender_addr:
     pub fn add_block(&mut self, transactions: Vec<Transaction>, sender_addr: Option<String>) {
         if !transactions.iter().all(|tx| tx.verify()) {
@@ -82,12 +96,21 @@ impl Blockchain {
             .unwrap()
             .as_millis();
         let prev_hash = last_block.hash.clone();
-        let new_block = Block::new(index, timestamp, transactions, prev_hash, sender_addr);
+        let mut new_block = Block::new(index, timestamp, transactions, prev_hash, sender_addr);
+        new_block.mine(DIFFICULTY_PREFIX);
         self.chain.push(new_block);
         self.balances = temp_balances;
     }
 
     pub fn is_valid_chain(&self) -> bool {
+        if self.chain.is_empty() {
+            return false;
+        }
+        let genesis = &self.chain[0];
+        if genesis.hash != genesis.calculate_hash() || !genesis.hash.starts_with(DIFFICULTY_PREFIX) {
+            println!("Genesis block invalid");
+            return false;
+        }
         for i in 1..self.chain.len() {
             let prev = &self.chain[i - 1];
             let curr = &self.chain[i];
@@ -101,6 +124,10 @@ impl Blockchain {
             }
             if curr.hash != curr.calculate_hash() {
                 println!("Block {} has invalid hash!", i);
+                return false;
+            }
+            if !curr.hash.starts_with(DIFFICULTY_PREFIX) {
+                println!("Block {} does not satisfy PoW", i);
                 return false;
             }
         }
