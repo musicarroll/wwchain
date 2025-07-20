@@ -141,6 +141,7 @@ mod tests {
             signature: None,
         };
         tx.sign(&sk);
+        bc.balances.insert(tx.sender.clone(), 1);
         bc.add_block(vec![tx.clone()], Some("addr".into()));
         assert_eq!(bc.chain.len(), 2);
         let last = bc.chain.last().unwrap();
@@ -214,6 +215,7 @@ mod tests {
             signature: None,
         };
         tx.sign(&sk);
+        bc.balances.insert(tx.sender.clone(), 2);
         bc.add_block(vec![tx], Some("addr".into()));
         assert!(bc.is_valid_chain());
         bc.chain[1].prev_hash = "bad".into();

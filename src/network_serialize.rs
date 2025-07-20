@@ -490,6 +490,7 @@ mod tests {
             signature: None,
         };
         tx.sign(&sk);
+        their.balances.insert(tx.sender.clone(), 1);
         their.add_block(vec![tx], Some("addr".into()));
         handle_chain_response(&mut local, their.chain.clone());
         assert_eq!(local.chain.len(), 2);
@@ -551,6 +552,7 @@ mod tests {
             signature: None,
         };
         tx.sign(&sk);
+        their_chain.balances.insert(tx.sender.clone(), 5);
         their_chain.add_block(vec![tx], Some("addr".into()));
         tokio::spawn(async move {
             if let Ok((mut stream, _)) = listener.accept().await {
@@ -630,6 +632,7 @@ mod tests {
 
         {
             let mut chain1 = bc1.lock().unwrap();
+            chain1.balances.insert(tx.sender.clone(), 3);
             chain1.add_block(vec![tx.clone()], Some(addr1.to_string()));
         }
 
