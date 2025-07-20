@@ -1,5 +1,7 @@
 # WWChain
 
+[![CI](https://github.com/OWNER/wwchain/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/wwchain/actions/workflows/ci.yml)
+
 WWChain is a minimal blockchain prototype written in Rust. Each node maintains its own chain, shares blocks and transactions over TCP and keeps a simple list of peers. The project exists mostly for learning and experimentation.
 
 ## Building
