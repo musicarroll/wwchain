@@ -85,7 +85,7 @@ pub fn handle_client_with_chain(mut stream: TcpStream, blockchain: Arc<Mutex<Blo
                             if let Some(sender_addr) = block.sender_addr.clone() {
                                 println!("[RECONCILE] Attempting to reconcile with block sender: {}", sender_addr);
                                 drop(chain); // unlock before net IO
-                                request_chain_and_reconcile(&sender_addr, blockchain.clone());
+                                request_chain_and_reconcile(&sender_addr, blockchain.clone(), &my_addr);
                             } else {
                                 println!("[RECONCILE] Received block with no sender_addr!");
                             }
@@ -144,7 +144,7 @@ pub async fn handle_client_with_chain(mut stream: TcpStream, blockchain: Arc<Mut
                         if block.index > local_tip {
                             if let Some(sender_addr) = block.sender_addr.clone() {
                                 println!("[RECONCILE] Attempting to reconcile with block sender: {}", sender_addr);
-                                request_chain_and_reconcile(&sender_addr, blockchain.clone()).await;
+                                request_chain_and_reconcile(&sender_addr, blockchain.clone(), &my_addr).await;
                             } else {
                                 println!("[RECONCILE] Received block with no sender_addr!");
                             }
@@ -258,10 +258,10 @@ pub async fn broadcast_message(peers: Arc<PeerList>, msg: &NetworkMessage) {
 /// Sends a ChainRequest to `addr` and waits for a ChainResponse.
 /// If a longer chain is received and valid, replaces `blockchain`.
 #[cfg(feature = "sync")]
-pub fn request_chain_and_reconcile(addr: &str, blockchain: Arc<Mutex<Blockchain>>) {
+pub fn request_chain_and_reconcile(addr: &str, blockchain: Arc<Mutex<Blockchain>>, my_addr: &str) {
     // Send a ChainRequest
     println!("[RECONCILE] Trying to connect to >{}<", addr); // Diagnostic print
-    let req = NetworkMessage::ChainRequest(addr.to_string());
+    let req = NetworkMessage::ChainRequest(my_addr.to_string());
     if let Ok(mut stream) = TcpStream::connect(addr.trim()) {
         let req_buf = req.serialize();
         if let Err(e) = stream.write_all(&req_buf) {
@@ -292,9 +292,9 @@ pub fn request_chain_and_reconcile(addr: &str, blockchain: Arc<Mutex<Blockchain>
 }
 
 #[cfg(not(feature = "sync"))]
-pub async fn request_chain_and_reconcile(addr: &str, blockchain: Arc<Mutex<Blockchain>>) {
+pub async fn request_chain_and_reconcile(addr: &str, blockchain: Arc<Mutex<Blockchain>>, my_addr: &str) {
     println!("[RECONCILE] Trying to connect to >{}<", addr);
-    let req = NetworkMessage::ChainRequest(addr.to_string());
+    let req = NetworkMessage::ChainRequest(my_addr.to_string());
     if let Ok(mut stream) = TcpStream::connect(addr.trim()).await {
         let req_buf = req.serialize();
         if let Err(e) = stream.write_all(&req_buf).await {
@@ -423,7 +423,7 @@ mod tests {
         });
 
         let local = Arc::new(Mutex::new(Blockchain::new()));
-        request_chain_and_reconcile(&addr.to_string(), local.clone()).await;
+        request_chain_and_reconcile(&addr.to_string(), local.clone(), "client").await;
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(local.lock().unwrap().chain.len(), 2);
     }
