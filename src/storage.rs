@@ -1,5 +1,4 @@
-use parity_db::{Db, Options};
-use parity_db::transaction::Transaction;
+use parity_db::{Db, Options, Transaction};
 use std::collections::HashMap;
 use std::fs;
 use std::io::{self, ErrorKind};
