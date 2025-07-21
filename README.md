@@ -51,7 +51,7 @@ Each node will print received messages and you can send transactions via the int
 
 ## Chain persistence
 
-Blocks are now stored in a [parity-db](https://crates.io/crates/parity-db) database. The database lives in a directory (default `chain_db`) which can be changed with the `--chain-dir` argument. Each block is written atomically so crashes cannot corrupt previously committed data.
+Blocks are now stored in a [RocksDB](https://crates.io/crates/rocksdb) database. The database lives in a directory (default `chain_db`) which can be changed with the `--chain-dir` argument. Each block is written atomically so crashes cannot corrupt previously committed data.
 
 ## Optional dependencies
 
