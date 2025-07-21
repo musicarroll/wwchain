@@ -17,13 +17,13 @@ This compiles the project and fetches all needed dependencies.
 Launch a node with optional arguments:
 
 ```bash
-cargo run -- --port <PORT> --node-name <NAME> --peers <PEER1,PEER2,...> --chain-file <FILE>
+cargo run -- --port <PORT> --node-name <NAME> --peers <PEER1,PEER2,...> --chain-dir <DIR>
 ```
 
 - `--port` - TCP port to listen on (default: 6001).
 - `--node-name` - friendly name used in prompts (default: "node1").
 - `--peers` - comma separated list of peer addresses to connect to at startup.
-- `--chain-file` - file path where the blockchain is stored (default: "chain.json").
+- `--chain-dir` - directory where the blockchain database is stored (default: `chain_db`).
 
 Example starting a single node:
 
@@ -51,7 +51,7 @@ Each node will print received messages and you can send transactions via the int
 
 ## Chain persistence
 
-The blockchain is saved to a JSON file (default `chain.json`) in the current directory. You can override this path with the `--chain-file` argument. On startup the node will load this file if it exists. Whenever a new block is added, the file is rewritten so the chain persists across runs.
+Blocks are now stored in a [parity-db](https://crates.io/crates/parity-db) database. The database lives in a directory (default `chain_db`) which can be changed with the `--chain-dir` argument. Each block is written atomically so crashes cannot corrupt previously committed data.
 
 ## Optional dependencies
 
