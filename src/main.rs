@@ -34,9 +34,9 @@ struct Cli {
     #[arg(long, default_value = "")]
     peers: String,
 
-    /// Path to the blockchain file
-    #[arg(long, default_value = "chain.json")]
-    chain_file: String,
+    /// Directory for the blockchain database
+    #[arg(long, default_value = "chain_db")]
+    chain_dir: String,
 }
 use std::sync::{Arc, Mutex};
 
@@ -47,7 +47,7 @@ async fn main() {
     let port = cli.port;
     let node_name = cli.node_name;
     let peers_csv = cli.peers;
-    let chain_file = cli.chain_file;
+    let chain_dir = cli.chain_dir;
     let server_addr = format!("127.0.0.1:{}", port);
 
     // --- Generate keypair for signing ---
@@ -74,9 +74,9 @@ async fn main() {
     }
 
     // --- Blockchain: shared (Arc<Mutex<_>> for reconciliation) ---
-    let initial_chain = match load_chain(&chain_file) {
+    let initial_chain = match load_chain(&chain_dir) {
         Ok(chain) => {
-            println!("[STORAGE] Loaded chain from {}", chain_file);
+            println!("[STORAGE] Loaded chain from {}", chain_dir);
             chain
         }
         Err(_) => {
@@ -123,7 +123,7 @@ async fn main() {
             }
         };
         bc.add_block(txs_to_commit, Some(server_addr.clone()));
-        if let Err(e) = save_chain(&bc, &chain_file) {
+        if let Err(e) = save_chain(&bc, &chain_dir) {
             eprintln!("[STORAGE] Failed to save chain: {}", e);
         }
     }
@@ -178,7 +178,7 @@ async fn main() {
                     }
                 };
                 bc.add_block(vec![tx.clone()], Some(server_addr.clone()));
-                if let Err(e) = save_chain(&bc, &chain_file) {
+                if let Err(e) = save_chain(&bc, &chain_dir) {
                     eprintln!("[STORAGE] Failed to save chain: {}", e);
                 }
 
