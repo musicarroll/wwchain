@@ -710,8 +710,8 @@ mod tests {
 
     #[test]
     fn test_handle_chain_response_replaces_chain() {
-        let mut local = Blockchain::new();
-        let mut their = Blockchain::new();
+        let mut local = Blockchain::new(None);
+        let mut their = Blockchain::new(None);
         let secp = Secp256k1::new();
         let mut rng = OsRng;
         let mut sk_bytes = [0u8; 32];
@@ -780,7 +780,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
 
-        let mut their_chain = Blockchain::new();
+        let mut their_chain = Blockchain::new(None);
         let secp = Secp256k1::new();
         let mut rng = OsRng;
         let mut sk_bytes = [0u8; 32];
@@ -811,7 +811,7 @@ mod tests {
             }
         });
 
-        let local = Arc::new(Mutex::new(Blockchain::new()));
+        let local = Arc::new(Mutex::new(Blockchain::new(None)));
         let client_sk = SecretKey::from_slice(&sk_bytes).unwrap();
         request_chain_and_reconcile(&addr.to_string(), local.clone(), "client", &client_sk).await;
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -828,8 +828,8 @@ mod tests {
         let addr2 = temp2.local_addr().unwrap();
         drop(temp2);
 
-        let bc1 = Arc::new(Mutex::new(Blockchain::new()));
-        let bc2 = Arc::new(Mutex::new(Blockchain::new()));
+        let bc1 = Arc::new(Mutex::new(Blockchain::new(None)));
+        let bc2 = Arc::new(Mutex::new(Blockchain::new(None)));
         let peers1 = Arc::new(PeerList::new());
         let peers2 = Arc::new(PeerList::new());
         peers1.add_peer(&addr2.to_string());
@@ -917,8 +917,8 @@ mod tests {
 
     #[test]
     fn test_handle_chain_response_rejects_invalid_chain() {
-        let mut local = Blockchain::new();
-        let mut their = Blockchain::new();
+        let mut local = Blockchain::new(None);
+        let mut their = Blockchain::new(None);
         // create a valid extra block then corrupt it
         let secp = Secp256k1::new();
         let mut rng = OsRng;
@@ -946,7 +946,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
 
-        let bc = Arc::new(Mutex::new(Blockchain::new()));
+        let bc = Arc::new(Mutex::new(Blockchain::new(None)));
         let peers = Arc::new(PeerList::new());
         let sk = Arc::new(SecretKey::from_slice(&[1u8; 32]).unwrap());
 
