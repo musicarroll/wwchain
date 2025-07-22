@@ -54,7 +54,7 @@ impl VersionedMessage {
         match serde_json::to_vec(self) {
             Ok(v) => v,
             Err(e) => {
-                eprintln!("Failed to serialize versioned message: {}", e);
+                tracing::error!("Failed to serialize versioned message: {}", e);
                 Vec::new()
             }
         }
@@ -66,7 +66,7 @@ impl NetworkMessage {
         match serde_json::to_vec(self) {
             Ok(v) => v,
             Err(e) => {
-                eprintln!("Failed to serialize network message: {}", e);
+                tracing::error!("Failed to serialize network message: {}", e);
                 Vec::new()
             }
         }
@@ -153,9 +153,9 @@ pub fn handle_chain_response(local_chain: &mut Blockchain, their_chain: Vec<Bloc
         }
         if valid {
             local_chain.chain = their_chain;
-            println!("[RECONCILE] Local chain updated from peer!");
+            tracing::info!("[RECONCILE] Local chain updated from peer!");
         } else {
-            println!("[RECONCILE] Received invalid chain, ignoring.");
+            tracing::info!("[RECONCILE] Received invalid chain, ignoring.");
         }
     }
 }
@@ -174,60 +174,60 @@ pub fn handle_client_with_chain(
         Ok(size) => {
             if let Ok(signed) = serde_json::from_slice::<SignedMessage>(&buffer[..size]) {
                 if signed.message.version != PROTOCOL_VERSION {
-                    eprintln!(
+                    tracing::error!(
                         "[PROTO] Unsupported protocol version {}",
                         signed.message.version
                     );
                     return;
                 }
                 if !signed.verify() {
-                    eprintln!("[AUTH] Invalid signature from peer");
+                    tracing::error!("[AUTH] Invalid signature from peer");
                     return;
                 }
                 let msg = signed.message.payload;
                 match msg {
                     NetworkMessage::Handshake(addr) => {
-                        println!("[SERIALIZED] Received Handshake from {}", addr);
+                        tracing::info!("[SERIALIZED] Received Handshake from {}", addr);
                         peers.add_peer(&addr);
                         let known = peers.all();
                         let resp = SignedMessage::new(NetworkMessage::PeerList(known), &sk);
                         let resp_buf = serde_json::to_vec(&resp).expect("serialize");
                         if let Err(e) = stream.write_all(&resp_buf) {
-                            eprintln!("Failed to write handshake response: {}", e);
+                            tracing::error!("Failed to write handshake response: {}", e);
                         }
                         return;
                     }
                     NetworkMessage::Transaction(tx) => {
-                        println!("[SERIALIZED] Received Transaction: {:?}", tx);
+                        tracing::info!("[SERIALIZED] Received Transaction: {:?}", tx);
                         if !tx.verify() {
-                            eprintln!("[SERIALIZED] Invalid transaction signature");
+                            tracing::error!("[SERIALIZED] Invalid transaction signature");
                         } else {
                             // You may wish to add to mempool here
                         }
                     }
                     NetworkMessage::Block(block) => {
-                        println!("[SERIALIZED] Received Block: {:?}", block);
+                        tracing::info!("[SERIALIZED] Received Block: {:?}", block);
                         if !block.transactions.iter().all(|tx| tx.verify()) {
-                            eprintln!("[SERIALIZED] Block contains invalid transaction");
+                            tracing::error!("[SERIALIZED] Block contains invalid transaction");
                             return;
                         }
                         let mut chain = match blockchain.lock() {
                             Ok(c) => c,
                             Err(e) => {
-                                eprintln!("Blockchain lock poisoned: {}", e);
+                                tracing::error!("Blockchain lock poisoned: {}", e);
                                 e.into_inner()
                             }
                         };
                         let local_tip = match chain.chain.last() {
                             Some(b) => b.index,
                             None => {
-                                eprintln!("Received block but local chain empty");
+                                tracing::error!("Received block but local chain empty");
                                 return;
                             }
                         };
                         if block.index > local_tip {
                             if let Some(sender_addr) = block.sender_addr.clone() {
-                                println!(
+                                tracing::info!(
                                     "[RECONCILE] Attempting to reconcile with block sender: {}",
                                     sender_addr
                                 );
@@ -239,18 +239,18 @@ pub fn handle_client_with_chain(
                                     &sk,
                                 );
                             } else {
-                                println!("[RECONCILE] Received block with no sender_addr!");
+                                tracing::info!("[RECONCILE] Received block with no sender_addr!");
                             }
                             return;
                         }
                         // Optionally: append if valid and next block
                     }
                     NetworkMessage::ChainRequest(requestor_addr) => {
-                        println!("[SERIALIZED] Received ChainRequest from {}", requestor_addr);
+                        tracing::info!("[SERIALIZED] Received ChainRequest from {}", requestor_addr);
                         let chain = match blockchain.lock() {
                             Ok(c) => c,
                             Err(e) => {
-                                eprintln!("Blockchain lock poisoned: {}", e);
+                                tracing::error!("Blockchain lock poisoned: {}", e);
                                 e.into_inner()
                             }
                         };
@@ -258,41 +258,41 @@ pub fn handle_client_with_chain(
                         let _ = send_message(&requestor_addr, &response, &sk);
                     }
                     NetworkMessage::ChainResponse(their_chain) => {
-                        println!(
+                        tracing::info!(
                             "[SERIALIZED] Received ChainResponse: {} blocks",
                             their_chain.len()
                         );
                         let mut chain = match blockchain.lock() {
                             Ok(c) => c,
                             Err(e) => {
-                                eprintln!("Blockchain lock poisoned: {}", e);
+                                tracing::error!("Blockchain lock poisoned: {}", e);
                                 e.into_inner()
                             }
                         };
                         handle_chain_response(&mut chain, their_chain);
                     }
                     NetworkMessage::PeerList(list) => {
-                        println!("[SERIALIZED] Received PeerList: {:?}", list);
+                        tracing::info!("[SERIALIZED] Received PeerList: {:?}", list);
                         peers.merge(&list);
                     }
-                    NetworkMessage::Text(s) => println!("[SERIALIZED] Received Text: {}", s),
+                    NetworkMessage::Text(s) => tracing::info!("[SERIALIZED] Received Text: {}", s),
                 }
                 let response = b"OK (parsed NetworkMessage)\n";
                 if let Err(e) = stream.write_all(response) {
-                    eprintln!("Failed to write response: {}", e);
+                    tracing::error!("Failed to write response: {}", e);
                 }
             } else {
-                println!(
+                tracing::info!(
                     "[SERIALIZED] Received (unparsed): {}",
                     String::from_utf8_lossy(&buffer[..size])
                 );
                 let response = b"Unrecognized data\n";
                 if let Err(e) = stream.write_all(response) {
-                    eprintln!("Failed to write response: {}", e);
+                    tracing::error!("Failed to write response: {}", e);
                 }
             }
         }
-        Err(e) => eprintln!("Error reading stream: {}", e),
+        Err(e) => tracing::error!("Error reading stream: {}", e),
     }
 }
 
@@ -309,20 +309,20 @@ pub async fn handle_client_with_chain(
         Ok(size) => {
             if let Ok(signed) = serde_json::from_slice::<SignedMessage>(&buffer[..size]) {
                 if signed.message.version != PROTOCOL_VERSION {
-                    eprintln!(
+                    tracing::error!(
                         "[PROTO] Unsupported protocol version {}",
                         signed.message.version
                     );
                     return;
                 }
                 if !signed.verify() {
-                    eprintln!("[AUTH] Invalid signature from peer");
+                    tracing::error!("[AUTH] Invalid signature from peer");
                     return;
                 }
                 let msg = signed.message.payload;
                 match msg {
                     NetworkMessage::Handshake(addr) => {
-                        println!("[SERIALIZED] Received Handshake from {}", addr);
+                        tracing::info!("[SERIALIZED] Received Handshake from {}", addr);
                         peers.add_peer(&addr);
                         let known = peers.all();
                         let resp = SignedMessage::new(NetworkMessage::PeerList(known), &sk);
@@ -331,36 +331,36 @@ pub async fn handle_client_with_chain(
                         return;
                     }
                     NetworkMessage::Transaction(tx) => {
-                        println!("[SERIALIZED] Received Transaction: {:?}", tx);
+                        tracing::info!("[SERIALIZED] Received Transaction: {:?}", tx);
                         if !tx.verify() {
-                            eprintln!("[SERIALIZED] Invalid transaction signature");
+                            tracing::error!("[SERIALIZED] Invalid transaction signature");
                         }
                     }
                     NetworkMessage::Block(block) => {
-                        println!("[SERIALIZED] Received Block: {:?}", block);
+                        tracing::info!("[SERIALIZED] Received Block: {:?}", block);
                         if !block.transactions.iter().all(|tx| tx.verify()) {
-                            eprintln!("[SERIALIZED] Block contains invalid transaction");
+                            tracing::error!("[SERIALIZED] Block contains invalid transaction");
                             return;
                         }
                         let local_tip = {
                             let chain = match blockchain.lock() {
                                 Ok(c) => c,
                                 Err(e) => {
-                                    eprintln!("Blockchain lock poisoned: {}", e);
+                                    tracing::error!("Blockchain lock poisoned: {}", e);
                                     e.into_inner()
                                 }
                             };
                             match chain.chain.last() {
                                 Some(b) => b.index,
                                 None => {
-                                    eprintln!("Received block but local chain empty");
+                                    tracing::error!("Received block but local chain empty");
                                     return;
                                 }
                             }
                         };
                         if block.index > local_tip {
                             if let Some(sender_addr) = block.sender_addr.clone() {
-                                println!(
+                                tracing::info!(
                                     "[RECONCILE] Attempting to reconcile with block sender: {}",
                                     sender_addr
                                 );
@@ -372,18 +372,18 @@ pub async fn handle_client_with_chain(
                                 )
                                 .await;
                             } else {
-                                println!("[RECONCILE] Received block with no sender_addr!");
+                                tracing::info!("[RECONCILE] Received block with no sender_addr!");
                             }
                             return;
                         }
                     }
                     NetworkMessage::ChainRequest(requestor_addr) => {
-                        println!("[SERIALIZED] Received ChainRequest from {}", requestor_addr);
+                        tracing::info!("[SERIALIZED] Received ChainRequest from {}", requestor_addr);
                         let chain_blocks = {
                             let chain = match blockchain.lock() {
                                 Ok(c) => c,
                                 Err(e) => {
-                                    eprintln!("Blockchain lock poisoned: {}", e);
+                                    tracing::error!("Blockchain lock poisoned: {}", e);
                                     e.into_inner()
                                 }
                             };
@@ -393,29 +393,29 @@ pub async fn handle_client_with_chain(
                         let _ = send_message(&requestor_addr, &response, &sk).await;
                     }
                     NetworkMessage::ChainResponse(their_chain) => {
-                        println!(
+                        tracing::info!(
                             "[SERIALIZED] Received ChainResponse: {} blocks",
                             their_chain.len()
                         );
                         let mut chain = match blockchain.lock() {
                             Ok(c) => c,
                             Err(e) => {
-                                eprintln!("Blockchain lock poisoned: {}", e);
+                                tracing::error!("Blockchain lock poisoned: {}", e);
                                 e.into_inner()
                             }
                         };
                         handle_chain_response(&mut chain, their_chain);
                     }
                     NetworkMessage::PeerList(list) => {
-                        println!("[SERIALIZED] Received PeerList: {:?}", list);
+                        tracing::info!("[SERIALIZED] Received PeerList: {:?}", list);
                         peers.merge(&list);
                     }
-                    NetworkMessage::Text(s) => println!("[SERIALIZED] Received Text: {}", s),
+                    NetworkMessage::Text(s) => tracing::info!("[SERIALIZED] Received Text: {}", s),
                 }
                 let response = b"OK (parsed NetworkMessage)\n";
                 let _ = stream.write_all(response).await;
             } else {
-                println!(
+                tracing::info!(
                     "[SERIALIZED] Received (unparsed): {}",
                     String::from_utf8_lossy(&buffer[..size])
                 );
@@ -423,7 +423,7 @@ pub async fn handle_client_with_chain(
                 let _ = stream.write_all(response).await;
             }
         }
-        Err(e) => eprintln!("Error reading stream: {}", e),
+        Err(e) => tracing::error!("Error reading stream: {}", e),
     }
 }
 
@@ -436,7 +436,7 @@ pub fn start_server_with_chain(
     sk: Arc<SecretKey>,
 ) -> io::Result<()> {
     let listener = TcpListener::bind(addr)?;
-    println!("[SERIALIZED] Server listening on {}", addr);
+    tracing::info!("[SERIALIZED] Server listening on {}", addr);
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
@@ -446,7 +446,7 @@ pub fn start_server_with_chain(
                 let sk_clone = sk.clone();
                 thread::spawn(|| handle_client_with_chain(stream, bc, p, me, sk_clone));
             }
-            Err(e) => eprintln!("Connection failed: {}", e),
+            Err(e) => tracing::error!("Connection failed: {}", e),
         }
     }
     Ok(())
@@ -461,7 +461,7 @@ pub async fn start_server_with_chain(
     sk: Arc<SecretKey>,
 ) -> io::Result<()> {
     let listener = TcpListener::bind(addr).await?;
-    println!("[SERIALIZED] Server listening on {}", addr);
+    tracing::info!("[SERIALIZED] Server listening on {}", addr);
     loop {
         let (stream, _) = listener.accept().await?;
         let bc = blockchain.clone();
@@ -484,7 +484,7 @@ pub fn send_message(addr: &str, msg: &NetworkMessage, sk: &SecretKey) -> io::Res
     stream.write_all(&buf)?;
     let mut buffer = [0; 4096];
     let size = stream.read(&mut buffer)?;
-    println!(
+    tracing::info!(
         "[SERIALIZED] Server responded: {}",
         String::from_utf8_lossy(&buffer[..size])
     );
@@ -499,7 +499,7 @@ pub async fn send_message(addr: &str, msg: &NetworkMessage, sk: &SecretKey) -> i
     stream.write_all(&buf).await?;
     let mut buffer = [0u8; 4096];
     let size = stream.read(&mut buffer).await?;
-    println!(
+    tracing::info!(
         "[SERIALIZED] Server responded: {}",
         String::from_utf8_lossy(&buffer[..size])
     );
@@ -510,7 +510,7 @@ pub async fn send_message(addr: &str, msg: &NetworkMessage, sk: &SecretKey) -> i
 pub fn broadcast_message(peers: Arc<PeerList>, msg: &NetworkMessage, sk: &SecretKey) {
     for peer_addr in peers.all() {
         if let Err(e) = send_message(&peer_addr, msg, sk) {
-            eprintln!("Failed to send to {}: {}", peer_addr, e);
+            tracing::error!("Failed to send to {}: {}", peer_addr, e);
         }
     }
 }
@@ -519,7 +519,7 @@ pub fn broadcast_message(peers: Arc<PeerList>, msg: &NetworkMessage, sk: &Secret
 pub async fn broadcast_message(peers: Arc<PeerList>, msg: &NetworkMessage, sk: &SecretKey) {
     for peer_addr in peers.all() {
         if let Err(e) = send_message(&peer_addr, msg, sk).await {
-            eprintln!("Failed to send to {}: {}", peer_addr, e);
+            tracing::error!("Failed to send to {}: {}", peer_addr, e);
         }
     }
 }
@@ -577,13 +577,13 @@ pub fn request_chain_and_reconcile(
     sk: &SecretKey,
 ) {
     // Send a ChainRequest
-    println!("[RECONCILE] Trying to connect to >{}<", addr); // Diagnostic print
+    tracing::info!("[RECONCILE] Trying to connect to >{}<", addr); // Diagnostic print
     let req = NetworkMessage::ChainRequest(my_addr.to_string());
     if let Ok(mut stream) = TcpStream::connect(addr.trim()) {
         let signed = SignedMessage::new(req, sk);
         let req_buf = serde_json::to_vec(&signed).expect("serialize");
         if let Err(e) = stream.write_all(&req_buf) {
-            eprintln!("[RECONCILE] Failed to send chain request: {}", e);
+            tracing::error!("[RECONCILE] Failed to send chain request: {}", e);
             return;
         }
         // Wait for a response (should be a ChainResponse)
@@ -592,40 +592,40 @@ pub fn request_chain_and_reconcile(
             Ok(size) => {
                 if let Ok(signed) = serde_json::from_slice::<SignedMessage>(&buffer[..size]) {
                     if signed.message.version != PROTOCOL_VERSION {
-                        eprintln!(
+                        tracing::error!(
                             "[RECONCILE] Unsupported protocol version {}",
                             signed.message.version
                         );
                         return;
                     }
                     if !signed.verify() {
-                        eprintln!("[RECONCILE] Invalid signature in chain response");
+                        tracing::error!("[RECONCILE] Invalid signature in chain response");
                         return;
                     }
                     if let NetworkMessage::ChainResponse(their_chain) = signed.message.payload {
-                        println!(
+                        tracing::info!(
                             "[RECONCILE] Received chain from peer: {} blocks",
                             their_chain.len()
                         );
                         let mut chain = match blockchain.lock() {
                             Ok(c) => c,
                             Err(e) => {
-                                eprintln!("Blockchain lock poisoned: {}", e);
+                                tracing::error!("Blockchain lock poisoned: {}", e);
                                 e.into_inner()
                             }
                         };
                         handle_chain_response(&mut chain, their_chain);
                     } else {
-                        eprintln!("[RECONCILE] Did not receive a ChainResponse message");
+                        tracing::error!("[RECONCILE] Did not receive a ChainResponse message");
                     }
                 } else {
-                    eprintln!("[RECONCILE] Failed to parse signed message");
+                    tracing::error!("[RECONCILE] Failed to parse signed message");
                 }
             }
-            Err(e) => eprintln!("[RECONCILE] Failed to read chain response: {}", e),
+            Err(e) => tracing::error!("[RECONCILE] Failed to read chain response: {}", e),
         }
     } else {
-        eprintln!("[RECONCILE] Failed to connect to peer for chain request.");
+        tracing::error!("[RECONCILE] Failed to connect to peer for chain request.");
     }
 }
 
@@ -636,13 +636,13 @@ pub async fn request_chain_and_reconcile(
     my_addr: &str,
     sk: &SecretKey,
 ) {
-    println!("[RECONCILE] Trying to connect to >{}<", addr);
+    tracing::info!("[RECONCILE] Trying to connect to >{}<", addr);
     let req = NetworkMessage::ChainRequest(my_addr.to_string());
     if let Ok(mut stream) = TcpStream::connect(addr.trim()).await {
         let signed = SignedMessage::new(req, sk);
         let req_buf = serde_json::to_vec(&signed).expect("serialize");
         if let Err(e) = stream.write_all(&req_buf).await {
-            eprintln!("[RECONCILE] Failed to send chain request: {}", e);
+            tracing::error!("[RECONCILE] Failed to send chain request: {}", e);
             return;
         }
         let mut buffer = [0u8; 65536];
@@ -650,40 +650,40 @@ pub async fn request_chain_and_reconcile(
             Ok(size) => {
                 if let Ok(signed) = serde_json::from_slice::<SignedMessage>(&buffer[..size]) {
                     if signed.message.version != PROTOCOL_VERSION {
-                        eprintln!(
+                        tracing::error!(
                             "[RECONCILE] Unsupported protocol version {}",
                             signed.message.version
                         );
                         return;
                     }
                     if !signed.verify() {
-                        eprintln!("[RECONCILE] Invalid signature in chain response");
+                        tracing::error!("[RECONCILE] Invalid signature in chain response");
                         return;
                     }
                     if let NetworkMessage::ChainResponse(their_chain) = signed.message.payload {
-                        println!(
+                        tracing::info!(
                             "[RECONCILE] Received chain from peer: {} blocks",
                             their_chain.len()
                         );
                         let mut chain = match blockchain.lock() {
                             Ok(c) => c,
                             Err(e) => {
-                                eprintln!("Blockchain lock poisoned: {}", e);
+                                tracing::error!("Blockchain lock poisoned: {}", e);
                                 e.into_inner()
                             }
                         };
                         handle_chain_response(&mut chain, their_chain);
                     } else {
-                        eprintln!("[RECONCILE] Did not receive a ChainResponse message");
+                        tracing::error!("[RECONCILE] Did not receive a ChainResponse message");
                     }
                 } else {
-                    eprintln!("[RECONCILE] Failed to parse signed message");
+                    tracing::error!("[RECONCILE] Failed to parse signed message");
                 }
             }
-            Err(e) => eprintln!("[RECONCILE] Failed to read chain response: {}", e),
+            Err(e) => tracing::error!("[RECONCILE] Failed to read chain response: {}", e),
         }
     } else {
-        eprintln!("[RECONCILE] Failed to connect to peer for chain request.");
+        tracing::error!("[RECONCILE] Failed to connect to peer for chain request.");
     }
 }
 

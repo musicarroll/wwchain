@@ -53,6 +53,10 @@ Each node will print received messages and you can send transactions via the int
 
 Blocks are now stored in a [RocksDB](https://crates.io/crates/rocksdb) database. The database lives in a directory (default `chain_db`) which can be changed with the `--chain-dir` argument. Each block is written atomically so crashes cannot corrupt previously committed data.
 
+## Logging
+
+Output is now produced using the [`tracing`](https://crates.io/crates/tracing) framework. Set the `RUST_LOG` environment variable to control log verbosity, e.g. `RUST_LOG=info`.
+
 ## Optional dependencies
 
 `Cargo.toml` includes commented dependencies for potential future features:

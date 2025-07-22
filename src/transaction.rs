@@ -28,7 +28,7 @@ impl Transaction {
         let msg = match Message::from_slice(&self.message_bytes()) {
             Ok(m) => m,
             Err(e) => {
-                eprintln!("Failed to create signing message: {}", e);
+                tracing::error!("Failed to create signing message: {}", e);
                 return;
             }
         };

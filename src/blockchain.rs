@@ -40,7 +40,7 @@ impl Blockchain {
         for (idx, block) in self.chain.iter().enumerate() {
             for tx in &block.transactions {
                 if idx != 0 && !tx.verify() {
-                    println!("[VALIDATION] Invalid tx signature in block {}", idx);
+                    tracing::info!("[VALIDATION] Invalid tx signature in block {}", idx);
                     return false;
                 }
                 if idx == 0 {
@@ -50,7 +50,7 @@ impl Blockchain {
                 }
                 let sbal = bals.get(&tx.sender).copied().unwrap_or(0);
                 if sbal < tx.amount {
-                    println!("[VALIDATION] Overspend in block {}", idx);
+                    tracing::info!("[VALIDATION] Overspend in block {}", idx);
                 }
                 bals.insert(tx.sender.clone(), sbal.saturating_sub(tx.amount));
                 let rbal = bals.get(&tx.recipient).copied().unwrap_or(0);
@@ -75,14 +75,14 @@ impl Blockchain {
     // Make this function accept sender_addr:
     pub fn add_block(&mut self, transactions: Vec<Transaction>, sender_addr: Option<String>) {
         if !transactions.iter().all(|tx| tx.verify()) {
-            println!("[BLOCKCHAIN] Rejected block with invalid transaction signature");
+            tracing::info!("[BLOCKCHAIN] Rejected block with invalid transaction signature");
             return;
         }
         let mut temp_balances = self.balances.clone();
         for tx in &transactions {
             let sbal = temp_balances.get(&tx.sender).copied().unwrap_or(0);
             if sbal < tx.amount {
-                println!("[BLOCKCHAIN] Rejected block - overspend by {}", tx.sender);
+                tracing::info!("[BLOCKCHAIN] Rejected block - overspend by {}", tx.sender);
                 return;
             }
             temp_balances.insert(tx.sender.clone(), sbal - tx.amount);
@@ -109,26 +109,26 @@ impl Blockchain {
         let genesis = &self.chain[0];
         if genesis.hash != genesis.calculate_hash() || !genesis.hash.starts_with(DIFFICULTY_PREFIX)
         {
-            println!("Genesis block invalid");
+            tracing::info!("Genesis block invalid");
             return false;
         }
         for i in 1..self.chain.len() {
             let prev = &self.chain[i - 1];
             let curr = &self.chain[i];
             if curr.index != prev.index + 1 {
-                println!("Invalid index at block {}", i);
+                tracing::info!("Invalid index at block {}", i);
                 return false;
             }
             if curr.prev_hash != prev.hash {
-                println!("Broken hash link at block {}", i);
+                tracing::info!("Broken hash link at block {}", i);
                 return false;
             }
             if curr.hash != curr.calculate_hash() {
-                println!("Block {} has invalid hash!", i);
+                tracing::info!("Block {} has invalid hash!", i);
                 return false;
             }
             if !curr.hash.starts_with(DIFFICULTY_PREFIX) {
-                println!("Block {} does not satisfy PoW", i);
+                tracing::info!("Block {} does not satisfy PoW", i);
                 return false;
             }
         }
