@@ -90,7 +90,12 @@ mod tests {
 
     #[test]
     fn test_mine_sets_nonce_and_valid_hash() {
-        let tx = Transaction { sender: "x".into(), recipient: "y".into(), amount: 1, signature: None };
+        let tx = Transaction {
+            sender: "x".into(),
+            recipient: "y".into(),
+            amount: 1,
+            signature: None,
+        };
         let mut block = Block::new(1, 1, vec![tx], "0".into(), None);
         block.mine("00");
         assert!(block.hash.starts_with("00"));

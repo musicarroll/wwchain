@@ -19,11 +19,11 @@ use crate::transaction::Transaction;
 
 /// Current protocol version understood by this node
 pub const PROTOCOL_VERSION: u8 = 1;
+use secp256k1::{ecdsa::Signature, Message, PublicKey, Secp256k1, SecretKey};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::io;
 use std::sync::{Arc, Mutex};
-use sha2::{Digest, Sha256};
-use secp256k1::{ecdsa::Signature, Message, PublicKey, Secp256k1, SecretKey};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum NetworkMessage {
@@ -174,7 +174,10 @@ pub fn handle_client_with_chain(
         Ok(size) => {
             if let Ok(signed) = serde_json::from_slice::<SignedMessage>(&buffer[..size]) {
                 if signed.message.version != PROTOCOL_VERSION {
-                    eprintln!("[PROTO] Unsupported protocol version {}", signed.message.version);
+                    eprintln!(
+                        "[PROTO] Unsupported protocol version {}",
+                        signed.message.version
+                    );
                     return;
                 }
                 if !signed.verify() {
@@ -306,7 +309,10 @@ pub async fn handle_client_with_chain(
         Ok(size) => {
             if let Ok(signed) = serde_json::from_slice::<SignedMessage>(&buffer[..size]) {
                 if signed.message.version != PROTOCOL_VERSION {
-                    eprintln!("[PROTO] Unsupported protocol version {}", signed.message.version);
+                    eprintln!(
+                        "[PROTO] Unsupported protocol version {}",
+                        signed.message.version
+                    );
                     return;
                 }
                 if !signed.verify() {
@@ -524,7 +530,9 @@ pub fn perform_handshake(addr: &str, my_addr: &str, peers: Arc<PeerList>, sk: &S
     if let Ok(mut stream) = TcpStream::connect(addr) {
         let signed = SignedMessage::new(NetworkMessage::Handshake(my_addr.to_string()), sk);
         let req_buf = serde_json::to_vec(&signed).expect("serialize");
-        if stream.write_all(&req_buf).is_err() { return; }
+        if stream.write_all(&req_buf).is_err() {
+            return;
+        }
         let mut buffer = [0; 65536];
         if let Ok(size) = stream.read(&mut buffer) {
             if let Ok(resp) = serde_json::from_slice::<SignedMessage>(&buffer[..size]) {
@@ -543,7 +551,9 @@ pub async fn perform_handshake(addr: &str, my_addr: &str, peers: Arc<PeerList>, 
     if let Ok(mut stream) = TcpStream::connect(addr).await {
         let signed = SignedMessage::new(NetworkMessage::Handshake(my_addr.to_string()), sk);
         let req_buf = serde_json::to_vec(&signed).expect("serialize");
-        if stream.write_all(&req_buf).await.is_err() { return; }
+        if stream.write_all(&req_buf).await.is_err() {
+            return;
+        }
         let mut buffer = [0u8; 65536];
         if let Ok(size) = stream.read(&mut buffer).await {
             if let Ok(resp) = serde_json::from_slice::<SignedMessage>(&buffer[..size]) {
@@ -560,7 +570,12 @@ pub async fn perform_handshake(addr: &str, my_addr: &str, peers: Arc<PeerList>, 
 /// Sends a ChainRequest to `addr` and waits for a ChainResponse.
 /// If a longer chain is received and valid, replaces `blockchain`.
 #[cfg(feature = "sync")]
-pub fn request_chain_and_reconcile(addr: &str, blockchain: Arc<Mutex<Blockchain>>, my_addr: &str, sk: &SecretKey) {
+pub fn request_chain_and_reconcile(
+    addr: &str,
+    blockchain: Arc<Mutex<Blockchain>>,
+    my_addr: &str,
+    sk: &SecretKey,
+) {
     // Send a ChainRequest
     println!("[RECONCILE] Trying to connect to >{}<", addr); // Diagnostic print
     let req = NetworkMessage::ChainRequest(my_addr.to_string());
@@ -577,7 +592,10 @@ pub fn request_chain_and_reconcile(addr: &str, blockchain: Arc<Mutex<Blockchain>
             Ok(size) => {
                 if let Ok(signed) = serde_json::from_slice::<SignedMessage>(&buffer[..size]) {
                     if signed.message.version != PROTOCOL_VERSION {
-                        eprintln!("[RECONCILE] Unsupported protocol version {}", signed.message.version);
+                        eprintln!(
+                            "[RECONCILE] Unsupported protocol version {}",
+                            signed.message.version
+                        );
                         return;
                     }
                     if !signed.verify() {
@@ -632,7 +650,10 @@ pub async fn request_chain_and_reconcile(
             Ok(size) => {
                 if let Ok(signed) = serde_json::from_slice::<SignedMessage>(&buffer[..size]) {
                     if signed.message.version != PROTOCOL_VERSION {
-                        eprintln!("[RECONCILE] Unsupported protocol version {}", signed.message.version);
+                        eprintln!(
+                            "[RECONCILE] Unsupported protocol version {}",
+                            signed.message.version
+                        );
                         return;
                     }
                     if !signed.verify() {

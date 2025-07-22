@@ -1,4 +1,4 @@
-use rocksdb::{Options, DB, WriteBatch};
+use rocksdb::{Options, WriteBatch, DB};
 use std::collections::HashMap;
 use std::fs;
 use std::io::{self, ErrorKind};
@@ -17,7 +17,10 @@ pub fn load_chain(path: &str) -> io::Result<Blockchain> {
     let mut index = 0u64;
     loop {
         let key = index.to_le_bytes();
-        match db.get(&key).map_err(|e| io::Error::new(ErrorKind::Other, e))? {
+        match db
+            .get(&key)
+            .map_err(|e| io::Error::new(ErrorKind::Other, e))?
+        {
             Some(bytes) => {
                 let block: Block = serde_json::from_slice(&bytes)
                     .map_err(|e| io::Error::new(ErrorKind::InvalidData, e))?;
@@ -51,7 +54,10 @@ pub fn save_chain(chain: &Blockchain, path: &str) -> io::Result<()> {
     let mut index = 0u64;
     loop {
         let key = index.to_le_bytes();
-        match db.get(&key).map_err(|e| io::Error::new(ErrorKind::Other, e))? {
+        match db
+            .get(&key)
+            .map_err(|e| io::Error::new(ErrorKind::Other, e))?
+        {
             Some(_) => index += 1,
             None => break,
         }
@@ -62,7 +68,8 @@ pub fn save_chain(chain: &Blockchain, path: &str) -> io::Result<()> {
         let value = serde_json::to_vec(block)?;
         batch.put(key, value);
     }
-    db.write(batch).map_err(|e| io::Error::new(ErrorKind::Other, e))?;
+    db.write(batch)
+        .map_err(|e| io::Error::new(ErrorKind::Other, e))?;
     Ok(())
 }
 
@@ -86,8 +93,10 @@ mod tests {
         let db = DB::open(&opts, &dir).unwrap();
         let genesis = Block::new(0, 0, vec![], "0".into(), None);
         let bad_block = Block::new(1, 0, vec![], "wrong".into(), None);
-        db.put(0u64.to_le_bytes(), serde_json::to_vec(&genesis).unwrap()).unwrap();
-        db.put(1u64.to_le_bytes(), serde_json::to_vec(&bad_block).unwrap()).unwrap();
+        db.put(0u64.to_le_bytes(), serde_json::to_vec(&genesis).unwrap())
+            .unwrap();
+        db.put(1u64.to_le_bytes(), serde_json::to_vec(&bad_block).unwrap())
+            .unwrap();
         let res = load_chain(dir.to_str().unwrap());
         fs::remove_dir_all(&dir).unwrap();
         assert!(res.is_err());

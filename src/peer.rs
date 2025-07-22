@@ -1,11 +1,11 @@
-use std::sync::{Arc, Mutex};
 use std::fs;
 use std::io::{self, ErrorKind};
-use std::path::Path;
-#[cfg(not(feature = "sync"))]
-use tokio::net::lookup_host;
 #[cfg(feature = "sync")]
 use std::net::ToSocketAddrs;
+use std::path::Path;
+use std::sync::{Arc, Mutex};
+#[cfg(not(feature = "sync"))]
+use tokio::net::lookup_host;
 
 #[derive(Debug, Clone)]
 pub struct PeerList {
@@ -44,8 +44,8 @@ impl PeerList {
             return Ok(PeerList::new());
         }
         let data = fs::read_to_string(path)?;
-        let peers: Vec<String> = serde_json::from_str(&data)
-            .map_err(|e| io::Error::new(ErrorKind::InvalidData, e))?;
+        let peers: Vec<String> =
+            serde_json::from_str(&data).map_err(|e| io::Error::new(ErrorKind::InvalidData, e))?;
         Ok(PeerList {
             peers: Arc::new(Mutex::new(peers)),
         })
@@ -57,8 +57,8 @@ impl PeerList {
         if let Some(parent) = path.as_ref().parent() {
             fs::create_dir_all(parent)?;
         }
-        let data = serde_json::to_string(&peers)
-            .map_err(|e| io::Error::new(ErrorKind::InvalidData, e))?;
+        let data =
+            serde_json::to_string(&peers).map_err(|e| io::Error::new(ErrorKind::InvalidData, e))?;
         fs::write(path, data)?;
         Ok(())
     }
@@ -112,7 +112,10 @@ mod tests {
     fn test_peerlist_persistence_roundtrip() {
         let dir = std::env::temp_dir().join(format!(
             "peers_{}",
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("peers.json");

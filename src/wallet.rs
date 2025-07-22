@@ -24,7 +24,10 @@ impl Wallet {
             let secp = Secp256k1::new();
             let public_key = PublicKey::from_secret_key(&secp, &secret_key);
             let address = hex::encode(public_key.serialize());
-            Ok(Wallet { secret_key, address })
+            Ok(Wallet {
+                secret_key,
+                address,
+            })
         } else {
             if let Some(parent) = path_ref.parent() {
                 fs::create_dir_all(parent)?;
@@ -38,7 +41,10 @@ impl Wallet {
             fs::write(path_ref, hex::encode(sk_bytes))?;
             let public_key = PublicKey::from_secret_key(&secp, &secret_key);
             let address = hex::encode(public_key.serialize());
-            Ok(Wallet { secret_key, address })
+            Ok(Wallet {
+                secret_key,
+                address,
+            })
         }
     }
 
@@ -60,7 +66,10 @@ mod tests {
     fn wallet_persists_key() {
         let dir = std::env::temp_dir().join(format!(
             "wallet_{}",
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("wallet.key");
@@ -77,7 +86,10 @@ mod tests {
     fn address_matches_public_key() {
         let dir = std::env::temp_dir().join(format!(
             "wallet_{}",
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("wallet.key");

@@ -107,7 +107,8 @@ impl Blockchain {
             return false;
         }
         let genesis = &self.chain[0];
-        if genesis.hash != genesis.calculate_hash() || !genesis.hash.starts_with(DIFFICULTY_PREFIX) {
+        if genesis.hash != genesis.calculate_hash() || !genesis.hash.starts_with(DIFFICULTY_PREFIX)
+        {
             println!("Genesis block invalid");
             return false;
         }

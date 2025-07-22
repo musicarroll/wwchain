@@ -10,11 +10,13 @@ mod wallet;
 use blockchain::Blockchain;
 use clap::Parser;
 use mempool::Mempool;
-use network_serialize::{broadcast_message, start_server_with_chain, perform_handshake, NetworkMessage};
+use network_serialize::{
+    broadcast_message, perform_handshake, start_server_with_chain, NetworkMessage,
+};
 use peer::PeerList;
-use wallet::Wallet;
 use storage::{load_chain, save_chain};
 use transaction::Transaction;
+use wallet::Wallet;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
