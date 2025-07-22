@@ -16,6 +16,9 @@ use crate::block::Block;
 use crate::blockchain::{Blockchain, DIFFICULTY_PREFIX};
 use crate::peer::PeerList;
 use crate::transaction::Transaction;
+
+/// Current protocol version understood by this node
+pub const PROTOCOL_VERSION: u8 = 1;
 use serde::{Deserialize, Serialize};
 use std::io;
 use std::sync::{Arc, Mutex};
@@ -29,6 +32,31 @@ pub enum NetworkMessage {
     Text(String),
     ChainRequest(String),      // requesting node's address
     ChainResponse(Vec<Block>), // the entire chain
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct VersionedMessage {
+    pub version: u8,
+    pub payload: NetworkMessage,
+}
+
+impl VersionedMessage {
+    pub fn new(payload: NetworkMessage) -> Self {
+        VersionedMessage {
+            version: PROTOCOL_VERSION,
+            payload,
+        }
+    }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        match serde_json::to_vec(self) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("Failed to serialize versioned message: {}", e);
+                Vec::new()
+            }
+        }
+    }
 }
 
 impl NetworkMessage {
@@ -45,15 +73,16 @@ impl NetworkMessage {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SignedMessage {
-    pub message: NetworkMessage,
+    pub message: VersionedMessage,
     pub signature: String,
     pub pubkey: String,
 }
 
 impl SignedMessage {
     pub fn new(message: NetworkMessage, sk: &SecretKey) -> Self {
+        let versioned = VersionedMessage::new(message);
         let secp = Secp256k1::new();
-        let serialized = message.serialize();
+        let serialized = serde_json::to_vec(&versioned).expect("serialize");
         let mut hasher = Sha256::new();
         hasher.update(&serialized);
         let digest = hasher.finalize();
@@ -61,7 +90,7 @@ impl SignedMessage {
         let sig = secp.sign_ecdsa(&msg, sk);
         let pubkey = PublicKey::from_secret_key(&secp, sk);
         SignedMessage {
-            message,
+            message: versioned,
             signature: hex::encode(sig.serialize_compact()),
             pubkey: hex::encode(pubkey.serialize()),
         }
@@ -142,11 +171,15 @@ pub fn handle_client_with_chain(
     match stream.read(&mut buffer) {
         Ok(size) => {
             if let Ok(signed) = serde_json::from_slice::<SignedMessage>(&buffer[..size]) {
+                if signed.message.version != PROTOCOL_VERSION {
+                    eprintln!("[PROTO] Unsupported protocol version {}", signed.message.version);
+                    return;
+                }
                 if !signed.verify() {
                     eprintln!("[AUTH] Invalid signature from peer");
                     return;
                 }
-                let msg = signed.message;
+                let msg = signed.message.payload;
                 match msg {
                     NetworkMessage::Transaction(tx) => {
                         println!("[SERIALIZED] Received Transaction: {:?}", tx);
@@ -255,11 +288,15 @@ pub async fn handle_client_with_chain(
     match stream.read(&mut buffer).await {
         Ok(size) => {
             if let Ok(signed) = serde_json::from_slice::<SignedMessage>(&buffer[..size]) {
+                if signed.message.version != PROTOCOL_VERSION {
+                    eprintln!("[PROTO] Unsupported protocol version {}", signed.message.version);
+                    return;
+                }
                 if !signed.verify() {
                     eprintln!("[AUTH] Invalid signature from peer");
                     return;
                 }
-                let msg = signed.message;
+                let msg = signed.message.payload;
                 match msg {
                     NetworkMessage::Transaction(tx) => {
                         println!("[SERIALIZED] Received Transaction: {:?}", tx);
@@ -470,11 +507,15 @@ pub fn request_chain_and_reconcile(addr: &str, blockchain: Arc<Mutex<Blockchain>
         match stream.read(&mut buffer) {
             Ok(size) => {
                 if let Ok(signed) = serde_json::from_slice::<SignedMessage>(&buffer[..size]) {
+                    if signed.message.version != PROTOCOL_VERSION {
+                        eprintln!("[RECONCILE] Unsupported protocol version {}", signed.message.version);
+                        return;
+                    }
                     if !signed.verify() {
                         eprintln!("[RECONCILE] Invalid signature in chain response");
                         return;
                     }
-                    if let NetworkMessage::ChainResponse(their_chain) = signed.message {
+                    if let NetworkMessage::ChainResponse(their_chain) = signed.message.payload {
                         println!(
                             "[RECONCILE] Received chain from peer: {} blocks",
                             their_chain.len()
@@ -521,11 +562,15 @@ pub async fn request_chain_and_reconcile(
         match stream.read(&mut buffer).await {
             Ok(size) => {
                 if let Ok(signed) = serde_json::from_slice::<SignedMessage>(&buffer[..size]) {
+                    if signed.message.version != PROTOCOL_VERSION {
+                        eprintln!("[RECONCILE] Unsupported protocol version {}", signed.message.version);
+                        return;
+                    }
                     if !signed.verify() {
                         eprintln!("[RECONCILE] Invalid signature in chain response");
                         return;
                     }
-                    if let NetworkMessage::ChainResponse(their_chain) = signed.message {
+                    if let NetworkMessage::ChainResponse(their_chain) = signed.message.payload {
                         println!(
                             "[RECONCILE] Received chain from peer: {} blocks",
                             their_chain.len()
@@ -667,7 +712,8 @@ mod tests {
                 let mut buf = [0u8; 65536];
                 let size = stream.read(&mut buf).await.unwrap();
                 let signed_req: SignedMessage = serde_json::from_slice(&buf[..size]).unwrap();
-                let _req = signed_req.message;
+                assert_eq!(signed_req.message.version, PROTOCOL_VERSION);
+                let _req = signed_req.message.payload;
                 let resp = NetworkMessage::ChainResponse(their_chain.chain.clone());
                 let signed_resp = SignedMessage::new(resp, &sk_clone);
                 let resp_buf = serde_json::to_vec(&signed_resp).unwrap();
