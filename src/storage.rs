@@ -77,6 +77,11 @@ pub fn save_chain(chain: &Blockchain, path: &str) -> io::Result<()> {
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+    use hex;
+    use rand::rngs::OsRng;
+    use rand::RngCore;
+    use secp256k1::{PublicKey, Secp256k1, SecretKey};
+    use crate::transaction::Transaction;
 
     #[test]
     fn load_chain_rejects_invalid() {
@@ -100,5 +105,53 @@ mod tests {
         let res = load_chain(dir.to_str().unwrap());
         fs::remove_dir_all(&dir).unwrap();
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn save_and_load_roundtrip() {
+        let dir = std::env::temp_dir().join(format!(
+            "chain_roundtrip_{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+
+        // Generate a key pair for the sender
+        let secp = Secp256k1::new();
+        let mut rng = OsRng;
+        let mut sk_bytes = [0u8; 32];
+        rng.fill_bytes(&mut sk_bytes);
+        let sk = SecretKey::from_slice(&sk_bytes).unwrap();
+        let pk = PublicKey::from_secret_key(&secp, &sk);
+        let sender = hex::encode(pk.serialize());
+
+        // Build a short blockchain with one funded genesis address
+        let mut bc = Blockchain::new(Some((sender.clone(), 100)));
+
+        // Add a single transaction spending some funds
+        let mut tx = Transaction {
+            sender: sender.clone(),
+            recipient: "bob".into(),
+            amount: 25,
+            signature: None,
+        };
+        tx.sign(&sk);
+        assert!(bc.add_block(vec![tx], Some(sender.clone())));
+
+        // Persist and reload the chain
+        save_chain(&bc, dir.to_str().unwrap()).unwrap();
+        let loaded = load_chain(dir.to_str().unwrap()).unwrap();
+
+        // Clean up temporary directory
+        fs::remove_dir_all(&dir).unwrap();
+
+        // The reloaded chain should match the original, including balances
+        assert_eq!(
+            serde_json::to_string(&loaded.chain).unwrap(),
+            serde_json::to_string(&bc.chain).unwrap()
+        );
+        assert_eq!(loaded.balances, bc.balances);
     }
 }
