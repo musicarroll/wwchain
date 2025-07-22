@@ -145,13 +145,18 @@ async fn main() {
                     }
                 };
                 let Some(txs) = txs_opt else { continue; };
-                let mut chain = bc.lock().unwrap();
-                if chain.add_block(txs, Some(addr.clone())) {
-                    if let Err(e) = save_chain(&chain, &chain_dir) {
-                        tracing::error!("[STORAGE] Failed to save chain: {}", e);
+                let block_opt = {
+                    let mut chain = bc.lock().unwrap();
+                    if chain.add_block(txs, Some(addr.clone())) {
+                        if let Err(e) = save_chain(&chain, &chain_dir) {
+                            tracing::error!("[STORAGE] Failed to save chain: {}", e);
+                        }
+                        Some(chain.chain.last().unwrap().clone())
+                    } else {
+                        None
                     }
-                    let block = chain.chain.last().unwrap().clone();
-                    drop(chain);
+                };
+                if let Some(block) = block_opt {
                     broadcast_message(peers_clone.clone(), &NetworkMessage::Block(block), &sk).await;
                 }
             }
