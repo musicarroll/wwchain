@@ -400,6 +400,10 @@ pub async fn handle_client_with_chain(
                         };
                         handle_chain_response(&mut chain, their_chain);
                     }
+                    NetworkMessage::PeerList(list) => {
+                        println!("[SERIALIZED] Received PeerList: {:?}", list);
+                        peers.merge(&list);
+                    }
                     NetworkMessage::Text(s) => println!("[SERIALIZED] Received Text: {}", s),
                 }
                 let response = b"OK (parsed NetworkMessage)\n";
