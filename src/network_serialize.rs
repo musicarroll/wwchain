@@ -26,6 +26,9 @@ use sha2::{Digest, Sha256};
 use std::io;
 use std::sync::{Arc, Mutex};
 
+/// Maximum size of a single serialized network message in bytes
+const MAX_MESSAGE_SIZE: usize = 10 * 1024 * 1024; // 10MB
+
 fn prefix_with_length(mut data: Vec<u8>) -> Vec<u8> {
     let len = data.len() as u32;
     let mut out = len.to_be_bytes().to_vec();
@@ -38,6 +41,12 @@ async fn read_length_prefixed(stream: &mut TcpStream) -> io::Result<Vec<u8>> {
     let mut len_buf = [0u8; 4];
     stream.read_exact(&mut len_buf).await?;
     let len = u32::from_be_bytes(len_buf) as usize;
+    if len > MAX_MESSAGE_SIZE {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "message too large",
+        ));
+    }
     let mut buf = vec![0u8; len];
     stream.read_exact(&mut buf).await?;
     Ok(buf)
@@ -49,6 +58,12 @@ fn read_length_prefixed(stream: &mut TcpStream) -> io::Result<Vec<u8>> {
     let mut len_buf = [0u8; 4];
     stream.read_exact(&mut len_buf)?;
     let len = u32::from_be_bytes(len_buf) as usize;
+    if len > MAX_MESSAGE_SIZE {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "message too large",
+        ));
+    }
     let mut buf = vec![0u8; len];
     stream.read_exact(&mut buf)?;
     Ok(buf)
