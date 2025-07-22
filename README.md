@@ -48,6 +48,8 @@ cargo run -- --port 6002 --node-name node2 --peers 127.0.0.1:6001
 ```
 
 Each node will print received messages and you can send transactions via the interactive prompt.
+The prompt also accepts a few commands like `add`, `remove`, `list` and `balance`.
+Use `balance` at any time to print your wallet's current balance.
 
 ## Chain persistence
 

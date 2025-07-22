@@ -76,7 +76,7 @@ async fn main() {
     let _ = peers.save_to_file(&peers_file);
 
     // --- Blockchain: shared (Arc<Mutex<_>> for reconciliation) ---
-    let initial_chain = match load_chain(&chain_dir) {
+    let mut initial_chain = match load_chain(&chain_dir) {
         Ok(chain) => {
             tracing::info!("[STORAGE] Loaded chain from {}", chain_dir);
             chain
@@ -86,6 +86,16 @@ async fn main() {
             Blockchain::new(Some((my_address.clone(), 100)))
         }
     };
+    let starting_balance = initial_chain
+        .balances
+        .get(&my_address)
+        .copied()
+        .unwrap_or(0);
+    tracing::info!(
+        "Wallet address {} starting balance {}",
+        my_address,
+        starting_balance
+    );
     let blockchain = Arc::new(Mutex::new(initial_chain));
 
     // --- Start server in a background task ---
@@ -154,7 +164,7 @@ async fn main() {
 
     use std::io::{self, Write};
 
-    tracing::info!("Type: tx <recipient> <amount>  |  add <peer_addr>  |  remove <peer_addr>  |  list  |  quit");
+    tracing::info!("Type: tx <recipient> <amount>  |  add <peer_addr>  |  remove <peer_addr>  |  list  |  balance  |  quit");
     tracing::info!("Example: tx alice 5");
     tracing::info!("Example: add 127.0.0.1:6004");
 
@@ -219,12 +229,23 @@ async fn main() {
             "list" => {
                 tracing::info!("Peers: {:?}", peers.all());
             }
+            "balance" => {
+                let bc = match blockchain.lock() {
+                    Ok(b) => b,
+                    Err(e) => {
+                        tracing::error!("Blockchain lock poisoned: {}", e);
+                        e.into_inner()
+                    }
+                };
+                let bal = bc.balances.get(&my_address).copied().unwrap_or(0);
+                tracing::info!("Balance for {}: {}", my_address, bal);
+            }
             "quit" | "exit" => {
                 tracing::info!("Node shutting down.");
                 let _ = peers.save_to_file(&peers_file);
                 break;
             }
-            _ => tracing::info!("Unrecognized. Use: tx <recipient> <amount> | add <peer_addr> | remove <peer_addr> | list | quit"),
+            _ => tracing::info!("Unrecognized. Use: tx <recipient> <amount> | add <peer_addr> | remove <peer_addr> | list | balance | quit"),
         }
     }
 }
