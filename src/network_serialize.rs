@@ -32,6 +32,8 @@ pub enum NetworkMessage {
     Text(String),
     ChainRequest(String),      // requesting node's address
     ChainResponse(Vec<Block>), // the entire chain
+    Handshake(String),         // peer introduction
+    PeerList(Vec<String>),     // returned during handshake
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -181,6 +183,17 @@ pub fn handle_client_with_chain(
                 }
                 let msg = signed.message.payload;
                 match msg {
+                    NetworkMessage::Handshake(addr) => {
+                        println!("[SERIALIZED] Received Handshake from {}", addr);
+                        peers.add_peer(&addr);
+                        let known = peers.all();
+                        let resp = SignedMessage::new(NetworkMessage::PeerList(known), &sk);
+                        let resp_buf = serde_json::to_vec(&resp).expect("serialize");
+                        if let Err(e) = stream.write_all(&resp_buf) {
+                            eprintln!("Failed to write handshake response: {}", e);
+                        }
+                        return;
+                    }
                     NetworkMessage::Transaction(tx) => {
                         println!("[SERIALIZED] Received Transaction: {:?}", tx);
                         if !tx.verify() {
@@ -255,6 +268,10 @@ pub fn handle_client_with_chain(
                         };
                         handle_chain_response(&mut chain, their_chain);
                     }
+                    NetworkMessage::PeerList(list) => {
+                        println!("[SERIALIZED] Received PeerList: {:?}", list);
+                        peers.merge(&list);
+                    }
                     NetworkMessage::Text(s) => println!("[SERIALIZED] Received Text: {}", s),
                 }
                 let response = b"OK (parsed NetworkMessage)\n";
@@ -298,6 +315,15 @@ pub async fn handle_client_with_chain(
                 }
                 let msg = signed.message.payload;
                 match msg {
+                    NetworkMessage::Handshake(addr) => {
+                        println!("[SERIALIZED] Received Handshake from {}", addr);
+                        peers.add_peer(&addr);
+                        let known = peers.all();
+                        let resp = SignedMessage::new(NetworkMessage::PeerList(known), &sk);
+                        let resp_buf = serde_json::to_vec(&resp).expect("serialize");
+                        let _ = stream.write_all(&resp_buf).await;
+                        return;
+                    }
                     NetworkMessage::Transaction(tx) => {
                         println!("[SERIALIZED] Received Transaction: {:?}", tx);
                         if !tx.verify() {
@@ -484,6 +510,45 @@ pub async fn broadcast_message(peers: Arc<PeerList>, msg: &NetworkMessage, sk: &
     for peer_addr in peers.all() {
         if let Err(e) = send_message(&peer_addr, msg, sk).await {
             eprintln!("Failed to send to {}: {}", peer_addr, e);
+        }
+    }
+}
+
+/// Perform a handshake with `addr` exchanging peer lists.
+#[cfg(feature = "sync")]
+pub fn perform_handshake(addr: &str, my_addr: &str, peers: Arc<PeerList>, sk: &SecretKey) {
+    if let Ok(mut stream) = TcpStream::connect(addr) {
+        let signed = SignedMessage::new(NetworkMessage::Handshake(my_addr.to_string()), sk);
+        let req_buf = serde_json::to_vec(&signed).expect("serialize");
+        if stream.write_all(&req_buf).is_err() { return; }
+        let mut buffer = [0; 65536];
+        if let Ok(size) = stream.read(&mut buffer) {
+            if let Ok(resp) = serde_json::from_slice::<SignedMessage>(&buffer[..size]) {
+                if resp.message.version == PROTOCOL_VERSION && resp.verify() {
+                    if let NetworkMessage::PeerList(list) = resp.message.payload {
+                        peers.merge(&list);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(not(feature = "sync"))]
+pub async fn perform_handshake(addr: &str, my_addr: &str, peers: Arc<PeerList>, sk: &SecretKey) {
+    if let Ok(mut stream) = TcpStream::connect(addr).await {
+        let signed = SignedMessage::new(NetworkMessage::Handshake(my_addr.to_string()), sk);
+        let req_buf = serde_json::to_vec(&signed).expect("serialize");
+        if stream.write_all(&req_buf).await.is_err() { return; }
+        let mut buffer = [0u8; 65536];
+        if let Ok(size) = stream.read(&mut buffer).await {
+            if let Ok(resp) = serde_json::from_slice::<SignedMessage>(&buffer[..size]) {
+                if resp.message.version == PROTOCOL_VERSION && resp.verify() {
+                    if let NetworkMessage::PeerList(list) = resp.message.payload {
+                        peers.merge(&list);
+                    }
+                }
+            }
         }
     }
 }

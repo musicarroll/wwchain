@@ -10,7 +10,7 @@ mod wallet;
 use blockchain::Blockchain;
 use clap::Parser;
 use mempool::Mempool;
-use network_serialize::{broadcast_message, start_server_with_chain, NetworkMessage};
+use network_serialize::{broadcast_message, start_server_with_chain, perform_handshake, NetworkMessage};
 use peer::PeerList;
 use wallet::Wallet;
 use storage::{load_chain, save_chain};
@@ -60,12 +60,14 @@ async fn main() {
     let my_address = wallet.address().to_string();
 
     // --- Initialize peer list ---
-    let peers = Arc::new(PeerList::new());
+    let peers_file = std::path::Path::new(&chain_dir).join("peers.json");
+    let peers = Arc::new(PeerList::load_from_file(&peers_file).unwrap_or_else(|_| PeerList::new()));
     for peer_addr in peers_csv.split(',') {
         if !peer_addr.trim().is_empty() {
             peers.add_peer(peer_addr.trim());
         }
     }
+    let _ = peers.save_to_file(&peers_file);
 
     // --- Blockchain: shared (Arc<Mutex<_>> for reconciliation) ---
     let initial_chain = match load_chain(&chain_dir) {
@@ -93,6 +95,12 @@ async fn main() {
             }
         });
     }
+
+    // Perform handshake with known peers
+    for peer_addr in peers.all() {
+        perform_handshake(&peer_addr, &server_addr, peers.clone(), &secret_key).await;
+    }
+    let _ = peers.save_to_file(&peers_file);
 
     println!("{} listening on {}", node_name, server_addr);
     println!("{} knows peers: {:?}", node_name, peers.all());
@@ -190,6 +198,7 @@ async fn main() {
                 let peer_addr = parts[1];
                 if !peers.contains(peer_addr) {
                     peers.add_peer(peer_addr);
+                    let _ = peers.save_to_file(&peers_file);
                     println!("Added peer: {}. Peers now: {:?}", peer_addr, peers.all());
                 } else {
                     println!("Peer {} already present.", peer_addr);
@@ -198,6 +207,7 @@ async fn main() {
             "remove" if parts.len() == 2 => {
                 let peer_addr = parts[1];
                 peers.remove_peer(peer_addr);
+                let _ = peers.save_to_file(&peers_file);
                 println!("Removed peer: {}. Remaining peers: {:?}", peer_addr, peers.all());
             }
             "list" => {
@@ -205,6 +215,7 @@ async fn main() {
             }
             "quit" | "exit" => {
                 println!("Node shutting down.");
+                let _ = peers.save_to_file(&peers_file);
                 break;
             }
             _ => println!("Unrecognized. Use: tx <recipient> <amount> | add <peer_addr> | remove <peer_addr> | list | quit"),
