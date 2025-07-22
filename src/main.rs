@@ -83,7 +83,7 @@ async fn main() {
         }
         Err(_) => {
             tracing::info!("[STORAGE] Starting new chain");
-            Blockchain::new()
+            Blockchain::new(Some((my_address.clone(), 100)))
         }
     };
     let blockchain = Arc::new(Mutex::new(initial_chain));

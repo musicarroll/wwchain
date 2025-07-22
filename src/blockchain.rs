@@ -12,17 +12,20 @@ pub struct Blockchain {
 }
 
 impl Blockchain {
-    pub fn new() -> Self {
-        let genesis_tx = Transaction {
-            sender: "genesis_address".to_string(),
-            recipient: "first_user".to_string(),
-            amount: 100,
-            signature: None,
+    pub fn new(genesis: Option<(String, u64)>) -> Self {
+        let txs = match genesis {
+            Some((recipient, amount)) => vec![Transaction {
+                sender: "genesis_address".to_string(),
+                recipient,
+                amount,
+                signature: None,
+            }],
+            None => Vec::new(),
         };
         let mut genesis_block = Block::new(
             0,
             0,
-            vec![genesis_tx],
+            txs,
             "0".to_string(),
             None, // <-- Genesis block has no sender_addr
         );
@@ -147,14 +150,14 @@ mod tests {
 
     #[test]
     fn test_blockchain_new_creates_genesis() {
-        let bc = Blockchain::new();
+        let bc = Blockchain::new(None);
         assert_eq!(bc.chain.len(), 1);
         assert_eq!(bc.chain[0].index, 0);
     }
 
     #[test]
     fn test_add_block() {
-        let mut bc = Blockchain::new();
+        let mut bc = Blockchain::new(None);
         let secp = Secp256k1::new();
         let mut rng = OsRng;
         let mut sk_bytes = [0u8; 32];
@@ -181,7 +184,7 @@ mod tests {
 
     #[test]
     fn test_reject_overspend() {
-        let mut bc = Blockchain::new();
+        let mut bc = Blockchain::new(None);
         let secp = Secp256k1::new();
         let mut rng = OsRng;
         let mut sk_bytes = [0u8; 32];
@@ -201,7 +204,7 @@ mod tests {
 
     #[test]
     fn test_reject_double_spend_in_block() {
-        let mut bc = Blockchain::new();
+        let mut bc = Blockchain::new(None);
         let secp = Secp256k1::new();
         let mut rng = OsRng;
         let mut sk_bytes = [0u8; 32];
@@ -228,7 +231,7 @@ mod tests {
 
     #[test]
     fn test_is_valid_chain_detection() {
-        let mut bc = Blockchain::new();
+        let mut bc = Blockchain::new(None);
         let secp = Secp256k1::new();
         let mut rng = OsRng;
         let mut sk_bytes = [0u8; 32];
@@ -251,7 +254,7 @@ mod tests {
 
     #[test]
     fn test_invalid_block_hash_detected() {
-        let mut bc = Blockchain::new();
+        let mut bc = Blockchain::new(None);
         let secp = Secp256k1::new();
         let mut rng = OsRng;
         let mut sk_bytes = [0u8; 32];
@@ -275,7 +278,7 @@ mod tests {
 
     #[test]
     fn test_reject_replayed_transaction() {
-        let mut bc = Blockchain::new();
+        let mut bc = Blockchain::new(None);
         let secp = Secp256k1::new();
         let mut rng = OsRng;
         let mut sk_bytes = [0u8; 32];
