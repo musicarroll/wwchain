@@ -26,6 +26,34 @@ use sha2::{Digest, Sha256};
 use std::io;
 use std::sync::{Arc, Mutex};
 
+fn prefix_with_length(mut data: Vec<u8>) -> Vec<u8> {
+    let len = data.len() as u32;
+    let mut out = len.to_be_bytes().to_vec();
+    out.append(&mut data);
+    out
+}
+
+#[cfg(not(feature = "sync"))]
+async fn read_length_prefixed(stream: &mut TcpStream) -> io::Result<Vec<u8>> {
+    let mut len_buf = [0u8; 4];
+    stream.read_exact(&mut len_buf).await?;
+    let len = u32::from_be_bytes(len_buf) as usize;
+    let mut buf = vec![0u8; len];
+    stream.read_exact(&mut buf).await?;
+    Ok(buf)
+}
+
+#[cfg(feature = "sync")]
+fn read_length_prefixed(stream: &mut TcpStream) -> io::Result<Vec<u8>> {
+    use std::io::Read;
+    let mut len_buf = [0u8; 4];
+    stream.read_exact(&mut len_buf)?;
+    let len = u32::from_be_bytes(len_buf) as usize;
+    let mut buf = vec![0u8; len];
+    stream.read_exact(&mut buf)?;
+    Ok(buf)
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum NetworkMessage {
     Transaction(Transaction),
@@ -171,10 +199,9 @@ pub fn handle_client_with_chain(
     my_addr: String,
     sk: Arc<SecretKey>,
 ) {
-    let mut buffer = [0; 4096];
-    match stream.read(&mut buffer) {
-        Ok(size) => {
-            if let Ok(signed) = serde_json::from_slice::<SignedMessage>(&buffer[..size]) {
+    match read_length_prefixed(&mut stream) {
+        Ok(buffer) => {
+            if let Ok(signed) = serde_json::from_slice::<SignedMessage>(&buffer) {
                 if signed.message.version != PROTOCOL_VERSION {
                     tracing::error!(
                         "[PROTO] Unsupported protocol version {}",
@@ -194,6 +221,7 @@ pub fn handle_client_with_chain(
                         let known = peers.all();
                         let resp = SignedMessage::new(NetworkMessage::PeerList(known), &sk);
                         let resp_buf = serde_json::to_vec(&resp).expect("serialize");
+                        let resp_buf = prefix_with_length(resp_buf);
                         if let Err(e) = stream.write_all(&resp_buf) {
                             tracing::error!("Failed to write handshake response: {}", e);
                         }
@@ -285,17 +313,17 @@ pub fn handle_client_with_chain(
                     tracing::error!("Failed to write response: {}", e);
                 }
             } else {
-                tracing::info!(
-                    "[SERIALIZED] Received (unparsed): {}",
-                    String::from_utf8_lossy(&buffer[..size])
-                );
+                tracing::info!("[SERIALIZED] Received unrecognized data");
                 let response = b"Unrecognized data\n";
                 if let Err(e) = stream.write_all(response) {
                     tracing::error!("Failed to write response: {}", e);
                 }
             }
         }
-        Err(e) => tracing::error!("Error reading stream: {}", e),
+        Err(e) => {
+            tracing::error!("Error reading stream: {}", e);
+            let _ = stream.write_all(b"Unrecognized data\n");
+        }
     }
 }
 
@@ -308,10 +336,9 @@ pub async fn handle_client_with_chain(
     my_addr: String,
     sk: Arc<SecretKey>,
 ) {
-    let mut buffer = [0u8; 4096];
-    match stream.read(&mut buffer).await {
-        Ok(size) => {
-            if let Ok(signed) = serde_json::from_slice::<SignedMessage>(&buffer[..size]) {
+    match read_length_prefixed(&mut stream).await {
+        Ok(buffer) => {
+            if let Ok(signed) = serde_json::from_slice::<SignedMessage>(&buffer) {
                 if signed.message.version != PROTOCOL_VERSION {
                     tracing::error!(
                         "[PROTO] Unsupported protocol version {}",
@@ -331,6 +358,7 @@ pub async fn handle_client_with_chain(
                         let known = peers.all();
                         let resp = SignedMessage::new(NetworkMessage::PeerList(known), &sk);
                         let resp_buf = serde_json::to_vec(&resp).expect("serialize");
+                        let resp_buf = prefix_with_length(resp_buf);
                         let _ = stream.write_all(&resp_buf).await;
                         return;
                     }
@@ -422,15 +450,15 @@ pub async fn handle_client_with_chain(
                 let response = b"OK (parsed NetworkMessage)\n";
                 let _ = stream.write_all(response).await;
             } else {
-                tracing::info!(
-                    "[SERIALIZED] Received (unparsed): {}",
-                    String::from_utf8_lossy(&buffer[..size])
-                );
+                tracing::info!("[SERIALIZED] Received unrecognized data");
                 let response = b"Unrecognized data\n";
                 let _ = stream.write_all(response).await;
             }
         }
-        Err(e) => tracing::error!("Error reading stream: {}", e),
+        Err(e) => {
+            tracing::error!("Error reading stream: {}", e);
+            let _ = stream.write_all(b"Unrecognized data\n").await;
+        }
     }
 }
 
@@ -492,6 +520,7 @@ pub fn send_message(addr: &str, msg: &NetworkMessage, sk: &SecretKey) -> io::Res
     let mut stream = TcpStream::connect(addr)?;
     let signed = SignedMessage::new(msg.clone(), sk);
     let buf = serde_json::to_vec(&signed)?;
+    let buf = prefix_with_length(buf);
     stream.write_all(&buf)?;
     let mut buffer = [0; 4096];
     let size = stream.read(&mut buffer)?;
@@ -507,6 +536,7 @@ pub async fn send_message(addr: &str, msg: &NetworkMessage, sk: &SecretKey) -> i
     let mut stream = TcpStream::connect(addr).await?;
     let signed = SignedMessage::new(msg.clone(), sk);
     let buf = serde_json::to_vec(&signed)?;
+    let buf = prefix_with_length(buf);
     stream.write_all(&buf).await?;
     let mut buffer = [0u8; 4096];
     let size = stream.read(&mut buffer).await?;
@@ -541,12 +571,12 @@ pub fn perform_handshake(addr: &str, my_addr: &str, peers: Arc<PeerList>, sk: &S
     if let Ok(mut stream) = TcpStream::connect(addr) {
         let signed = SignedMessage::new(NetworkMessage::Handshake(my_addr.to_string()), sk);
         let req_buf = serde_json::to_vec(&signed).expect("serialize");
+        let req_buf = prefix_with_length(req_buf);
         if stream.write_all(&req_buf).is_err() {
             return;
         }
-        let mut buffer = [0; 65536];
-        if let Ok(size) = stream.read(&mut buffer) {
-            if let Ok(resp) = serde_json::from_slice::<SignedMessage>(&buffer[..size]) {
+        if let Ok(buffer) = read_length_prefixed(&mut stream) {
+            if let Ok(resp) = serde_json::from_slice::<SignedMessage>(&buffer) {
                 if resp.message.version == PROTOCOL_VERSION && resp.verify() {
                     if let NetworkMessage::PeerList(list) = resp.message.payload {
                         peers.merge(&list);
@@ -562,12 +592,12 @@ pub async fn perform_handshake(addr: &str, my_addr: &str, peers: Arc<PeerList>, 
     if let Ok(mut stream) = TcpStream::connect(addr).await {
         let signed = SignedMessage::new(NetworkMessage::Handshake(my_addr.to_string()), sk);
         let req_buf = serde_json::to_vec(&signed).expect("serialize");
+        let req_buf = prefix_with_length(req_buf);
         if stream.write_all(&req_buf).await.is_err() {
             return;
         }
-        let mut buffer = [0u8; 65536];
-        if let Ok(size) = stream.read(&mut buffer).await {
-            if let Ok(resp) = serde_json::from_slice::<SignedMessage>(&buffer[..size]) {
+        if let Ok(buffer) = read_length_prefixed(&mut stream).await {
+            if let Ok(resp) = serde_json::from_slice::<SignedMessage>(&buffer) {
                 if resp.message.version == PROTOCOL_VERSION && resp.verify() {
                     if let NetworkMessage::PeerList(list) = resp.message.payload {
                         peers.merge(&list);
@@ -593,15 +623,15 @@ pub fn request_chain_and_reconcile(
     if let Ok(mut stream) = TcpStream::connect(addr.trim()) {
         let signed = SignedMessage::new(req, sk);
         let req_buf = serde_json::to_vec(&signed).expect("serialize");
+        let req_buf = prefix_with_length(req_buf);
         if let Err(e) = stream.write_all(&req_buf) {
             tracing::error!("[RECONCILE] Failed to send chain request: {}", e);
             return;
         }
         // Wait for a response (should be a ChainResponse)
-        let mut buffer = [0; 65536];
-        match stream.read(&mut buffer) {
-            Ok(size) => {
-                if let Ok(signed) = serde_json::from_slice::<SignedMessage>(&buffer[..size]) {
+        match read_length_prefixed(&mut stream) {
+            Ok(buffer) => {
+                if let Ok(signed) = serde_json::from_slice::<SignedMessage>(&buffer) {
                     if signed.message.version != PROTOCOL_VERSION {
                         tracing::error!(
                             "[RECONCILE] Unsupported protocol version {}",
@@ -652,14 +682,14 @@ pub async fn request_chain_and_reconcile(
     if let Ok(mut stream) = TcpStream::connect(addr.trim()).await {
         let signed = SignedMessage::new(req, sk);
         let req_buf = serde_json::to_vec(&signed).expect("serialize");
+        let req_buf = prefix_with_length(req_buf);
         if let Err(e) = stream.write_all(&req_buf).await {
             tracing::error!("[RECONCILE] Failed to send chain request: {}", e);
             return;
         }
-        let mut buffer = [0u8; 65536];
-        match stream.read(&mut buffer).await {
-            Ok(size) => {
-                if let Ok(signed) = serde_json::from_slice::<SignedMessage>(&buffer[..size]) {
+        match read_length_prefixed(&mut stream).await {
+            Ok(buffer) => {
+                if let Ok(signed) = serde_json::from_slice::<SignedMessage>(&buffer) {
                     if signed.message.version != PROTOCOL_VERSION {
                         tracing::error!(
                             "[RECONCILE] Unsupported protocol version {}",
@@ -810,14 +840,18 @@ mod tests {
         let sk_clone = sk.clone();
         tokio::spawn(async move {
             if let Ok((mut stream, _)) = listener.accept().await {
-                let mut buf = [0u8; 65536];
-                let size = stream.read(&mut buf).await.unwrap();
-                let signed_req: SignedMessage = serde_json::from_slice(&buf[..size]).unwrap();
+                let mut len_buf = [0u8; 4];
+                stream.read_exact(&mut len_buf).await.unwrap();
+                let len = u32::from_be_bytes(len_buf) as usize;
+                let mut buf = vec![0u8; len];
+                stream.read_exact(&mut buf).await.unwrap();
+                let signed_req: SignedMessage = serde_json::from_slice(&buf).unwrap();
                 assert_eq!(signed_req.message.version, PROTOCOL_VERSION);
                 let _req = signed_req.message.payload;
                 let resp = NetworkMessage::ChainResponse(their_chain.chain.clone());
                 let signed_resp = SignedMessage::new(resp, &sk_clone);
                 let resp_buf = serde_json::to_vec(&signed_resp).unwrap();
+                let resp_buf = prefix_with_length(resp_buf);
                 stream.write_all(&resp_buf).await.unwrap();
             }
         });
@@ -1030,5 +1064,85 @@ mod tests {
         assert_eq!(mempool.lock().unwrap().pending, vec![tx]);
 
         server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_large_transaction_message() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let bc = Arc::new(Mutex::new(Blockchain::new(None)));
+        let peers = Arc::new(PeerList::new());
+        let mempool = Arc::new(Mutex::new(Mempool::new()));
+        let sk = Arc::new(SecretKey::from_slice(&[1u8; 32]).unwrap());
+
+        let bc_clone = bc.clone();
+        let peers_clone = peers.clone();
+        let mp_clone = mempool.clone();
+        let addr_str = addr.to_string();
+        let sk_clone = sk.clone();
+        let server = tokio::spawn(async move {
+            if let Ok((stream, _)) = listener.accept().await {
+                handle_client_with_chain(stream, bc_clone, peers_clone, mp_clone, addr_str, sk_clone).await;
+            }
+        });
+
+        let secp = Secp256k1::new();
+        let mut rng = OsRng;
+        let mut sk_bytes = [0u8; 32];
+        rng.fill_bytes(&mut sk_bytes);
+        let tx_sk = SecretKey::from_slice(&sk_bytes).unwrap();
+        let pk = PublicKey::from_secret_key(&secp, &tx_sk);
+        let mut tx = Transaction {
+            sender: hex::encode(pk.serialize()),
+            recipient: "x".repeat(5000),
+            amount: 1,
+            signature: None,
+        };
+        tx.sign(&tx_sk);
+
+        send_message(&addr.to_string(), &NetworkMessage::Transaction(tx.clone()), &sk)
+            .await
+            .unwrap();
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(mempool.lock().unwrap().pending, vec![tx]);
+
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_handshake_large_peerlist() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let sk_server = SecretKey::from_slice(&[1u8; 32]).unwrap();
+        let sk_client = SecretKey::from_slice(&[2u8; 32]).unwrap();
+
+        tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                // read handshake request
+                let mut len_buf = [0u8; 4];
+                stream.read_exact(&mut len_buf).await.unwrap();
+                let len = u32::from_be_bytes(len_buf) as usize;
+                let mut buf = vec![0u8; len];
+                stream.read_exact(&mut buf).await.unwrap();
+                let _req: SignedMessage = serde_json::from_slice(&buf).unwrap();
+
+                // prepare large peer list
+                let mut peers = Vec::new();
+                for i in 0..200 {
+                    peers.push(format!("peer{}", i));
+                }
+                let resp = SignedMessage::new(NetworkMessage::PeerList(peers), &sk_server);
+                let resp_buf = serde_json::to_vec(&resp).unwrap();
+                let resp_buf = prefix_with_length(resp_buf);
+                stream.write_all(&resp_buf).await.unwrap();
+            }
+        });
+
+        let peerlist = Arc::new(PeerList::new());
+        perform_handshake(&addr.to_string(), "me", peerlist.clone(), &sk_client).await;
+        assert!(peerlist.all().len() >= 200);
     }
 }
