@@ -75,18 +75,22 @@ impl Blockchain {
         Self::chain_work(&self.chain)
     }
 
-    // Make this function accept sender_addr:
-    pub fn add_block(&mut self, transactions: Vec<Transaction>, sender_addr: Option<String>) {
+    // Make this function accept sender_addr and return whether the block was added
+    pub fn add_block(
+        &mut self,
+        transactions: Vec<Transaction>,
+        sender_addr: Option<String>,
+    ) -> bool {
         if !transactions.iter().all(|tx| tx.verify()) {
             tracing::info!("[BLOCKCHAIN] Rejected block with invalid transaction signature");
-            return;
+            return false;
         }
         let mut temp_balances = self.balances.clone();
         for tx in &transactions {
             let sbal = temp_balances.get(&tx.sender).copied().unwrap_or(0);
             if sbal < tx.amount {
                 tracing::info!("[BLOCKCHAIN] Rejected block - overspend by {}", tx.sender);
-                return;
+                return false;
             }
             temp_balances.insert(tx.sender.clone(), sbal - tx.amount);
             let rbal = temp_balances.get(&tx.recipient).copied().unwrap_or(0);
@@ -103,6 +107,7 @@ impl Blockchain {
         new_block.mine(DIFFICULTY_PREFIX);
         self.chain.push(new_block);
         self.balances = temp_balances;
+        true
     }
 
     pub fn is_valid_chain(&self) -> bool {
@@ -172,7 +177,7 @@ mod tests {
         };
         tx.sign(&sk);
         bc.balances.insert(tx.sender.clone(), 1);
-        bc.add_block(vec![tx.clone()], Some("addr".into()));
+        assert!(bc.add_block(vec![tx.clone()], Some("addr".into())));
         assert_eq!(bc.chain.len(), 2);
         let last = bc.chain.last().unwrap();
         assert_eq!(last.index, 1);
@@ -198,7 +203,7 @@ mod tests {
             signature: None,
         };
         tx.sign(&sk);
-        bc.add_block(vec![tx], Some("addr".into()));
+        assert!(!bc.add_block(vec![tx], Some("addr".into())));
         assert_eq!(bc.chain.len(), 1); // rejected
     }
 
@@ -225,7 +230,7 @@ mod tests {
             signature: None,
         };
         tx2.sign(&sk);
-        bc.add_block(vec![tx1, tx2], Some("addr".into()));
+        assert!(!bc.add_block(vec![tx1, tx2], Some("addr".into())));
         assert_eq!(bc.chain.len(), 1); // rejected
     }
 
@@ -246,7 +251,7 @@ mod tests {
         };
         tx.sign(&sk);
         bc.balances.insert(tx.sender.clone(), 2);
-        bc.add_block(vec![tx], Some("addr".into()));
+        assert!(bc.add_block(vec![tx], Some("addr".into())));
         assert!(bc.is_valid_chain());
         bc.chain[1].prev_hash = "bad".into();
         assert!(!bc.is_valid_chain());
@@ -269,7 +274,7 @@ mod tests {
         };
         tx.sign(&sk);
         bc.balances.insert(tx.sender.clone(), 1);
-        bc.add_block(vec![tx], Some("addr".into()));
+        assert!(bc.add_block(vec![tx], Some("addr".into())));
         assert!(bc.is_valid_chain());
         // Corrupt the stored hash so PoW and hash check fail
         bc.chain[1].hash = "1234".into();
@@ -293,10 +298,10 @@ mod tests {
         };
         tx.sign(&sk);
         bc.balances.insert(tx.sender.clone(), 1);
-        bc.add_block(vec![tx.clone()], Some("addr".into()));
+        assert!(bc.add_block(vec![tx.clone()], Some("addr".into())));
         assert_eq!(bc.chain.len(), 2);
         // Replay the same transaction which should now overspend
-        bc.add_block(vec![tx], Some("addr".into()));
+        assert!(!bc.add_block(vec![tx], Some("addr".into())));
         assert_eq!(bc.chain.len(), 2); // second block rejected
     }
 }
