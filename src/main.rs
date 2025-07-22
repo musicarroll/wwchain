@@ -5,17 +5,14 @@ mod network_serialize;
 mod peer;
 mod storage;
 mod transaction;
+mod wallet;
 
 use blockchain::Blockchain;
 use clap::Parser;
 use mempool::Mempool;
 use network_serialize::{broadcast_message, start_server_with_chain, NetworkMessage};
 use peer::PeerList;
-use rand::rngs::OsRng;
-use rand::RngCore;
-use secp256k1::PublicKey;
-use secp256k1::Secp256k1;
-use secp256k1::SecretKey;
+use wallet::Wallet;
 use storage::{load_chain, save_chain};
 use transaction::Transaction;
 
@@ -50,20 +47,17 @@ async fn main() {
     let chain_dir = cli.chain_dir;
     let server_addr = format!("127.0.0.1:{}", port);
 
-    // --- Generate keypair for signing ---
-    let secp = Secp256k1::new();
-    let mut rng = OsRng;
-    let mut sk_bytes = [0u8; 32];
-    rng.fill_bytes(&mut sk_bytes);
-    let secret_key = match SecretKey::from_slice(&sk_bytes) {
-        Ok(sk) => sk,
+    // --- Load or create wallet ---
+    let wallet_path = std::path::Path::new(&chain_dir).join("wallet.key");
+    let wallet = match Wallet::load_or_create(&wallet_path) {
+        Ok(w) => w,
         Err(e) => {
-            eprintln!("Failed to create secret key: {}", e);
+            eprintln!("Failed to load wallet: {}", e);
             return;
         }
     };
-    let public_key = PublicKey::from_secret_key(&secp, &secret_key);
-    let my_address = hex::encode(public_key.serialize());
+    let secret_key = wallet.secret_key().clone();
+    let my_address = wallet.address().to_string();
 
     // --- Initialize peer list ---
     let peers = Arc::new(PeerList::new());
