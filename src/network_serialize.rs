@@ -914,4 +914,58 @@ mod tests {
         server1.abort();
         server2.abort();
     }
+
+    #[test]
+    fn test_handle_chain_response_rejects_invalid_chain() {
+        let mut local = Blockchain::new();
+        let mut their = Blockchain::new();
+        // create a valid extra block then corrupt it
+        let secp = Secp256k1::new();
+        let mut rng = OsRng;
+        let mut sk_bytes = [0u8; 32];
+        rng.fill_bytes(&mut sk_bytes);
+        let sk = SecretKey::from_slice(&sk_bytes).unwrap();
+        let pk = PublicKey::from_secret_key(&secp, &sk);
+        let mut tx = Transaction {
+            sender: hex::encode(pk.serialize()),
+            recipient: "b".into(),
+            amount: 1,
+            signature: None,
+        };
+        tx.sign(&sk);
+        their.balances.insert(tx.sender.clone(), 1);
+        their.add_block(vec![tx], Some("addr".into()));
+        // tamper block hash
+        their.chain[1].hash = "00bad".into();
+        handle_chain_response(&mut local, their.chain.clone());
+        assert_eq!(local.chain.len(), 1); // chain not replaced
+    }
+
+    #[tokio::test]
+    async fn test_handle_malformed_network_message() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let bc = Arc::new(Mutex::new(Blockchain::new()));
+        let peers = Arc::new(PeerList::new());
+        let sk = Arc::new(SecretKey::from_slice(&[1u8; 32]).unwrap());
+
+        let bc_clone = bc.clone();
+        let peers_clone = peers.clone();
+        let addr_str = addr.to_string();
+        let sk_clone = sk.clone();
+        let server = tokio::spawn(async move {
+            if let Ok((stream, _)) = listener.accept().await {
+                handle_client_with_chain(stream, bc_clone, peers_clone, addr_str, sk_clone).await;
+            }
+        });
+
+        let mut stream = TcpStream::connect(addr).await.unwrap();
+        stream.write_all(b"notjson").await.unwrap();
+        let mut buf = [0u8; 64];
+        let n = stream.read(&mut buf).await.unwrap();
+        assert_eq!(&buf[..n], b"Unrecognized data\n");
+
+        server.await.unwrap();
+    }
 }

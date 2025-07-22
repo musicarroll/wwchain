@@ -248,4 +248,52 @@ mod tests {
         bc.chain[1].prev_hash = "bad".into();
         assert!(!bc.is_valid_chain());
     }
+
+    #[test]
+    fn test_invalid_block_hash_detected() {
+        let mut bc = Blockchain::new();
+        let secp = Secp256k1::new();
+        let mut rng = OsRng;
+        let mut sk_bytes = [0u8; 32];
+        rng.fill_bytes(&mut sk_bytes);
+        let sk = SecretKey::from_slice(&sk_bytes).unwrap();
+        let pk = PublicKey::from_secret_key(&secp, &sk);
+        let mut tx = Transaction {
+            sender: hex::encode(pk.serialize()),
+            recipient: "b".into(),
+            amount: 1,
+            signature: None,
+        };
+        tx.sign(&sk);
+        bc.balances.insert(tx.sender.clone(), 1);
+        bc.add_block(vec![tx], Some("addr".into()));
+        assert!(bc.is_valid_chain());
+        // Corrupt the stored hash so PoW and hash check fail
+        bc.chain[1].hash = "1234".into();
+        assert!(!bc.is_valid_chain());
+    }
+
+    #[test]
+    fn test_reject_replayed_transaction() {
+        let mut bc = Blockchain::new();
+        let secp = Secp256k1::new();
+        let mut rng = OsRng;
+        let mut sk_bytes = [0u8; 32];
+        rng.fill_bytes(&mut sk_bytes);
+        let sk = SecretKey::from_slice(&sk_bytes).unwrap();
+        let pk = PublicKey::from_secret_key(&secp, &sk);
+        let mut tx = Transaction {
+            sender: hex::encode(pk.serialize()),
+            recipient: "b".into(),
+            amount: 1,
+            signature: None,
+        };
+        tx.sign(&sk);
+        bc.balances.insert(tx.sender.clone(), 1);
+        bc.add_block(vec![tx.clone()], Some("addr".into()));
+        assert_eq!(bc.chain.len(), 2);
+        // Replay the same transaction which should now overspend
+        bc.add_block(vec![tx], Some("addr".into()));
+        assert_eq!(bc.chain.len(), 2); // second block rejected
+    }
 }
