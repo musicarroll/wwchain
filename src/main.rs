@@ -136,13 +136,15 @@ async fn main() {
         tokio::spawn(async move {
             loop {
                 sleep(Duration::from_secs(1)).await;
-                let txs = {
+                let txs_opt = {
                     let mut m = mp.lock().unwrap();
                     if m.pending.is_empty() {
-                        continue;
+                        None
+                    } else {
+                        Some(m.drain())
                     }
-                    m.drain()
                 };
+                let Some(txs) = txs_opt else { continue; };
                 let mut chain = bc.lock().unwrap();
                 if chain.add_block(txs, Some(addr.clone())) {
                     if let Err(e) = save_chain(&chain, &chain_dir) {

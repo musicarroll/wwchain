@@ -853,7 +853,7 @@ mod tests {
         let addr1_str = addr1.to_string();
         let server1_bc = bc1.clone();
         let server1_peers = peers1.clone();
-        let server1_mp = Arc::new(Mempool::new());
+        let server1_mp = Arc::new(Mutex::new(Mempool::new()));
         let server1_mp_clone = server1_mp.clone();
         let addr1_my = addr1_str.clone();
         let node1_sk = SecretKey::from_slice(&[1u8; 32]).unwrap();
@@ -868,7 +868,7 @@ mod tests {
         let addr2_str = addr2.to_string();
         let server2_bc = bc2.clone();
         let server2_peers = peers2.clone();
-        let server2_mp = Arc::new(Mempool::new());
+        let server2_mp = Arc::new(Mutex::new(Mempool::new()));
         let server2_mp_clone = server2_mp.clone();
         let addr2_my = addr2_str.clone();
         let node2_sk = SecretKey::from_slice(&[2u8; 32]).unwrap();
@@ -967,7 +967,7 @@ mod tests {
 
         let bc_clone = bc.clone();
         let peers_clone = peers.clone();
-        let mp = Arc::new(Mempool::new());
+        let mp = Arc::new(Mutex::new(Mempool::new()));
         let mp_clone = mp.clone();
         let addr_str = addr.to_string();
         let sk_clone = sk.clone();
