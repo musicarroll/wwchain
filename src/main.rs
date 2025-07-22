@@ -140,7 +140,7 @@ async fn main() {
                 e.into_inner()
             }
         };
-        bc.add_block(txs_to_commit, Some(server_addr.clone()));
+        let _ = bc.add_block(txs_to_commit, Some(server_addr.clone()));
         if let Err(e) = save_chain(&bc, &chain_dir) {
             tracing::error!("[STORAGE] Failed to save chain: {}", e);
         }
@@ -195,20 +195,24 @@ async fn main() {
                         e.into_inner()
                     }
                 };
-                bc.add_block(vec![tx.clone()], Some(server_addr.clone()));
-                if let Err(e) = save_chain(&bc, &chain_dir) {
-                    tracing::error!("[STORAGE] Failed to save chain: {}", e);
-                }
-
-                let last_block = match bc.chain.last() {
-                    Some(b) => b.clone(),
-                    None => {
-                        tracing::error!("Blockchain empty when broadcasting");
-                        continue;
+                let added = bc.add_block(vec![tx.clone()], Some(server_addr.clone()));
+                if added {
+                    if let Err(e) = save_chain(&bc, &chain_dir) {
+                        tracing::error!("[STORAGE] Failed to save chain: {}", e);
                     }
-                };
-                drop(bc); // unlock before broadcast
-                broadcast_message(peers.clone(), &NetworkMessage::Block(last_block), &secret_key).await;
+
+                    let last_block = match bc.chain.last() {
+                        Some(b) => b.clone(),
+                        None => {
+                            tracing::error!("Blockchain empty when broadcasting");
+                            continue;
+                        }
+                    };
+                    drop(bc); // unlock before broadcast
+                    broadcast_message(peers.clone(), &NetworkMessage::Block(last_block), &secret_key).await;
+                } else {
+                    tracing::error!("Failed to add block. Possibly insufficient funds.");
+                }
             }
             "add" if parts.len() == 2 => {
                 let peer_addr = parts[1];

@@ -726,7 +726,7 @@ mod tests {
         };
         tx.sign(&sk);
         their.balances.insert(tx.sender.clone(), 1);
-        their.add_block(vec![tx], Some("addr".into()));
+        let _ = their.add_block(vec![tx], Some("addr".into()));
         handle_chain_response(&mut local, their.chain.clone());
         assert_eq!(local.chain.len(), 2);
     }
@@ -795,7 +795,7 @@ mod tests {
         };
         tx.sign(&sk);
         their_chain.balances.insert(tx.sender.clone(), 5);
-        their_chain.add_block(vec![tx], Some("addr".into()));
+        let _ = their_chain.add_block(vec![tx], Some("addr".into()));
         let sk_clone = sk.clone();
         tokio::spawn(async move {
             if let Ok((mut stream, _)) = listener.accept().await {
@@ -886,7 +886,7 @@ mod tests {
         {
             let mut chain1 = bc1.lock().unwrap();
             chain1.balances.insert(tx.sender.clone(), 3);
-            chain1.add_block(vec![tx.clone()], Some(addr1.to_string()));
+            let _ = chain1.add_block(vec![tx.clone()], Some(addr1.to_string()));
         }
 
         let block = {
@@ -934,7 +934,7 @@ mod tests {
         };
         tx.sign(&sk);
         their.balances.insert(tx.sender.clone(), 1);
-        their.add_block(vec![tx], Some("addr".into()));
+        let _ = their.add_block(vec![tx], Some("addr".into()));
         // tamper block hash
         their.chain[1].hash = "00bad".into();
         handle_chain_response(&mut local, their.chain.clone());
