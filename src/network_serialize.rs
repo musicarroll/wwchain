@@ -16,6 +16,7 @@ use crate::block::Block;
 use crate::blockchain::{Blockchain, DIFFICULTY_PREFIX};
 use crate::peer::PeerList;
 use crate::transaction::Transaction;
+use crate::mempool::Mempool;
 
 /// Current protocol version understood by this node
 pub const PROTOCOL_VERSION: u8 = 1;
@@ -160,12 +161,13 @@ pub fn handle_chain_response(local_chain: &mut Blockchain, their_chain: Vec<Bloc
     }
 }
 
-// ---- Handler expects Arc<Mutex<Blockchain>> and Arc<PeerList> ----
+// ---- Handler expects Arc<Mutex<Blockchain>>, Arc<PeerList> and Arc<Mutex<Mempool>> ----
 #[cfg(feature = "sync")]
 pub fn handle_client_with_chain(
     mut stream: TcpStream,
     blockchain: Arc<Mutex<Blockchain>>,
     peers: Arc<PeerList>,
+    mempool: Arc<Mutex<Mempool>>,
     my_addr: String,
     sk: Arc<SecretKey>,
 ) {
@@ -202,7 +204,8 @@ pub fn handle_client_with_chain(
                         if !tx.verify() {
                             tracing::error!("[SERIALIZED] Invalid transaction signature");
                         } else {
-                            // You may wish to add to mempool here
+                            let mut mp = mempool.lock().unwrap();
+                            mp.add_tx(tx);
                         }
                     }
                     NetworkMessage::Block(block) => {
@@ -301,6 +304,7 @@ pub async fn handle_client_with_chain(
     mut stream: TcpStream,
     blockchain: Arc<Mutex<Blockchain>>,
     peers: Arc<PeerList>,
+    mempool: Arc<Mutex<Mempool>>,
     my_addr: String,
     sk: Arc<SecretKey>,
 ) {
@@ -334,6 +338,9 @@ pub async fn handle_client_with_chain(
                         tracing::info!("[SERIALIZED] Received Transaction: {:?}", tx);
                         if !tx.verify() {
                             tracing::error!("[SERIALIZED] Invalid transaction signature");
+                        } else {
+                            let mut mp = mempool.lock().unwrap();
+                            mp.add_tx(tx);
                         }
                     }
                     NetworkMessage::Block(block) => {
@@ -432,6 +439,7 @@ pub fn start_server_with_chain(
     addr: &str,
     blockchain: Arc<Mutex<Blockchain>>,
     peers: Arc<PeerList>,
+    mempool: Arc<Mutex<Mempool>>,
     my_addr: String,
     sk: Arc<SecretKey>,
 ) -> io::Result<()> {
@@ -443,8 +451,9 @@ pub fn start_server_with_chain(
                 let bc = blockchain.clone();
                 let p = peers.clone();
                 let me = my_addr.clone();
+                let mp = mempool.clone();
                 let sk_clone = sk.clone();
-                thread::spawn(|| handle_client_with_chain(stream, bc, p, me, sk_clone));
+                thread::spawn(|| handle_client_with_chain(stream, bc, p, mp, me, sk_clone));
             }
             Err(e) => tracing::error!("Connection failed: {}", e),
         }
@@ -457,6 +466,7 @@ pub async fn start_server_with_chain(
     addr: &str,
     blockchain: Arc<Mutex<Blockchain>>,
     peers: Arc<PeerList>,
+    mempool: Arc<Mutex<Mempool>>,
     my_addr: String,
     sk: Arc<SecretKey>,
 ) -> io::Result<()> {
@@ -467,9 +477,10 @@ pub async fn start_server_with_chain(
         let bc = blockchain.clone();
         let p = peers.clone();
         let me = my_addr.clone();
+        let mp = mempool.clone();
         let sk_clone = sk.clone();
         task::spawn(async move {
-            handle_client_with_chain(stream, bc, p, me, sk_clone).await;
+            handle_client_with_chain(stream, bc, p, mp, me, sk_clone).await;
         });
     }
     #[allow(unreachable_code)]
@@ -842,12 +853,14 @@ mod tests {
         let addr1_str = addr1.to_string();
         let server1_bc = bc1.clone();
         let server1_peers = peers1.clone();
+        let server1_mp = Arc::new(Mempool::new());
+        let server1_mp_clone = server1_mp.clone();
         let addr1_my = addr1_str.clone();
         let node1_sk = SecretKey::from_slice(&[1u8; 32]).unwrap();
         let sk1_arc = Arc::new(node1_sk);
         let server1_sk = sk1_arc.clone();
         let server1 = tokio::spawn(async move {
-            start_server_with_chain(&addr1_str, server1_bc, server1_peers, addr1_my, server1_sk)
+            start_server_with_chain(&addr1_str, server1_bc, server1_peers, server1_mp_clone, addr1_my, server1_sk)
                 .await
                 .unwrap();
         });
@@ -855,12 +868,14 @@ mod tests {
         let addr2_str = addr2.to_string();
         let server2_bc = bc2.clone();
         let server2_peers = peers2.clone();
+        let server2_mp = Arc::new(Mempool::new());
+        let server2_mp_clone = server2_mp.clone();
         let addr2_my = addr2_str.clone();
         let node2_sk = SecretKey::from_slice(&[2u8; 32]).unwrap();
         let sk2_arc = Arc::new(node2_sk);
         let server2_sk = sk2_arc.clone();
         let server2 = tokio::spawn(async move {
-            start_server_with_chain(&addr2_str, server2_bc, server2_peers, addr2_my, server2_sk)
+            start_server_with_chain(&addr2_str, server2_bc, server2_peers, server2_mp_clone, addr2_my, server2_sk)
                 .await
                 .unwrap();
         });
@@ -952,11 +967,13 @@ mod tests {
 
         let bc_clone = bc.clone();
         let peers_clone = peers.clone();
+        let mp = Arc::new(Mempool::new());
+        let mp_clone = mp.clone();
         let addr_str = addr.to_string();
         let sk_clone = sk.clone();
         let server = tokio::spawn(async move {
             if let Ok((stream, _)) = listener.accept().await {
-                handle_client_with_chain(stream, bc_clone, peers_clone, addr_str, sk_clone).await;
+                handle_client_with_chain(stream, bc_clone, peers_clone, mp_clone, addr_str, sk_clone).await;
             }
         });
 
@@ -965,6 +982,52 @@ mod tests {
         let mut buf = [0u8; 64];
         let n = stream.read(&mut buf).await.unwrap();
         assert_eq!(&buf[..n], b"Unrecognized data\n");
+
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_transaction_added_to_mempool() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let bc = Arc::new(Mutex::new(Blockchain::new(None)));
+        let peers = Arc::new(PeerList::new());
+        let mempool = Arc::new(Mutex::new(Mempool::new()));
+        let sk = Arc::new(SecretKey::from_slice(&[1u8; 32]).unwrap());
+
+        let bc_clone = bc.clone();
+        let peers_clone = peers.clone();
+        let mp_clone = mempool.clone();
+        let addr_str = addr.to_string();
+        let sk_clone = sk.clone();
+        let server = tokio::spawn(async move {
+            if let Ok((stream, _)) = listener.accept().await {
+                handle_client_with_chain(stream, bc_clone, peers_clone, mp_clone, addr_str, sk_clone).await;
+            }
+        });
+
+        // create a signed transaction
+        let secp = Secp256k1::new();
+        let mut rng = OsRng;
+        let mut sk_bytes = [0u8; 32];
+        rng.fill_bytes(&mut sk_bytes);
+        let tx_sk = SecretKey::from_slice(&sk_bytes).unwrap();
+        let pk = PublicKey::from_secret_key(&secp, &tx_sk);
+        let mut tx = Transaction {
+            sender: hex::encode(pk.serialize()),
+            recipient: "bob".into(),
+            amount: 1,
+            signature: None,
+        };
+        tx.sign(&tx_sk);
+
+        send_message(&addr.to_string(), &NetworkMessage::Transaction(tx.clone()), &sk)
+            .await
+            .unwrap();
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(mempool.lock().unwrap().pending, vec![tx]);
 
         server.await.unwrap();
     }

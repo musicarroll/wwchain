@@ -17,6 +17,7 @@ use peer::PeerList;
 use storage::{load_chain, save_chain};
 use transaction::Transaction;
 use wallet::Wallet;
+use tokio::time::{sleep, Duration};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -97,16 +98,19 @@ async fn main() {
         starting_balance
     );
     let blockchain = Arc::new(Mutex::new(initial_chain));
+    // --- Shared mempool ---
+    let mempool = Arc::new(Mutex::new(Mempool::new()));
 
     // --- Start server in a background task ---
     {
         let bc = blockchain.clone();
         let p = peers.clone();
+        let mp = mempool.clone();
         let addr = server_addr.clone();
         let me = server_addr.clone();
         let sk = secret_key.clone();
         tokio::spawn(async move {
-            if let Err(e) = start_server_with_chain(&addr, bc, p, me, Arc::new(sk)).await {
+            if let Err(e) = start_server_with_chain(&addr, bc, p, mp, me, Arc::new(sk)).await {
                 tracing::error!("Server error: {}", e);
             }
         });
@@ -121,30 +125,37 @@ async fn main() {
     tracing::info!("{} listening on {}", node_name, server_addr);
     tracing::info!("{} knows peers: {:?}", node_name, peers.all());
 
-    // --- Mempool demo logic (per node, not shared) ---
-    let mut mempool = Mempool::new();
-    let mut demo_tx = Transaction {
-        sender: my_address.clone(),
-        recipient: format!("{}_second_user", node_name),
-        amount: 25,
-        signature: None,
-    };
-    demo_tx.sign(&secret_key);
-    mempool.add_tx(demo_tx);
-    let txs_to_commit = mempool.drain();
+    // --- Periodically mine or broadcast pending transactions ---
     {
-        let mut bc = match blockchain.lock() {
-            Ok(b) => b,
-            Err(e) => {
-                tracing::error!("Blockchain lock poisoned: {}", e);
-                e.into_inner()
+        let bc = blockchain.clone();
+        let mp = mempool.clone();
+        let peers_clone = peers.clone();
+        let addr = server_addr.clone();
+        let sk = secret_key.clone();
+        let chain_dir = chain_dir.clone();
+        tokio::spawn(async move {
+            loop {
+                sleep(Duration::from_secs(1)).await;
+                let txs = {
+                    let mut m = mp.lock().unwrap();
+                    if m.pending.is_empty() {
+                        continue;
+                    }
+                    m.drain()
+                };
+                let mut chain = bc.lock().unwrap();
+                if chain.add_block(txs, Some(addr.clone())) {
+                    if let Err(e) = save_chain(&chain, &chain_dir) {
+                        tracing::error!("[STORAGE] Failed to save chain: {}", e);
+                    }
+                    let block = chain.chain.last().unwrap().clone();
+                    drop(chain);
+                    broadcast_message(peers_clone.clone(), &NetworkMessage::Block(block), &sk).await;
+                }
             }
-        };
-        let _ = bc.add_block(txs_to_commit, Some(server_addr.clone()));
-        if let Err(e) = save_chain(&bc, &chain_dir) {
-            tracing::error!("[STORAGE] Failed to save chain: {}", e);
-        }
+        });
     }
+
 
     // --- Broadcast a greeting and a transaction to all peers ---
     broadcast_message(
