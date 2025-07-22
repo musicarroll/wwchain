@@ -38,9 +38,13 @@ struct Cli {
     chain_dir: String,
 }
 use std::sync::{Arc, Mutex};
+use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .init();
     // --- Command-line argument parsing using clap ---
     let cli = Cli::parse();
     let port = cli.port;
@@ -54,7 +58,7 @@ async fn main() {
     let wallet = match Wallet::load_or_create(&wallet_path) {
         Ok(w) => w,
         Err(e) => {
-            eprintln!("Failed to load wallet: {}", e);
+            tracing::error!("Failed to load wallet: {}", e);
             return;
         }
     };
@@ -74,11 +78,11 @@ async fn main() {
     // --- Blockchain: shared (Arc<Mutex<_>> for reconciliation) ---
     let initial_chain = match load_chain(&chain_dir) {
         Ok(chain) => {
-            println!("[STORAGE] Loaded chain from {}", chain_dir);
+            tracing::info!("[STORAGE] Loaded chain from {}", chain_dir);
             chain
         }
         Err(_) => {
-            println!("[STORAGE] Starting new chain");
+            tracing::info!("[STORAGE] Starting new chain");
             Blockchain::new()
         }
     };
@@ -93,7 +97,7 @@ async fn main() {
         let sk = secret_key.clone();
         tokio::spawn(async move {
             if let Err(e) = start_server_with_chain(&addr, bc, p, me, Arc::new(sk)).await {
-                eprintln!("Server error: {}", e);
+                tracing::error!("Server error: {}", e);
             }
         });
     }
@@ -104,8 +108,8 @@ async fn main() {
     }
     let _ = peers.save_to_file(&peers_file);
 
-    println!("{} listening on {}", node_name, server_addr);
-    println!("{} knows peers: {:?}", node_name, peers.all());
+    tracing::info!("{} listening on {}", node_name, server_addr);
+    tracing::info!("{} knows peers: {:?}", node_name, peers.all());
 
     // --- Mempool demo logic (per node, not shared) ---
     let mut mempool = Mempool::new();
@@ -122,13 +126,13 @@ async fn main() {
         let mut bc = match blockchain.lock() {
             Ok(b) => b,
             Err(e) => {
-                eprintln!("Blockchain lock poisoned: {}", e);
+                tracing::error!("Blockchain lock poisoned: {}", e);
                 e.into_inner()
             }
         };
         bc.add_block(txs_to_commit, Some(server_addr.clone()));
         if let Err(e) = save_chain(&bc, &chain_dir) {
-            eprintln!("[STORAGE] Failed to save chain: {}", e);
+            tracing::error!("[STORAGE] Failed to save chain: {}", e);
         }
     }
 
@@ -150,18 +154,18 @@ async fn main() {
 
     use std::io::{self, Write};
 
-    println!("Type: tx <recipient> <amount>  |  add <peer_addr>  |  remove <peer_addr>  |  list  |  quit");
-    println!("Example: tx alice 5");
-    println!("Example: add 127.0.0.1:6004");
+    tracing::info!("Type: tx <recipient> <amount>  |  add <peer_addr>  |  remove <peer_addr>  |  list  |  quit");
+    tracing::info!("Example: tx alice 5");
+    tracing::info!("Example: add 127.0.0.1:6004");
 
     loop {
         print!("{}> ", node_name);
         if let Err(e) = io::stdout().flush() {
-            eprintln!("Failed to flush stdout: {}", e);
+            tracing::error!("Failed to flush stdout: {}", e);
         }
         let mut line = String::new();
         if let Err(e) = io::stdin().read_line(&mut line) {
-            eprintln!("Failed to read line: {}", e);
+            tracing::error!("Failed to read line: {}", e);
             continue;
         }
         let parts: Vec<_> = line.trim().split_whitespace().collect();
@@ -177,19 +181,19 @@ async fn main() {
                 let mut bc = match blockchain.lock() {
                     Ok(b) => b,
                     Err(e) => {
-                        eprintln!("Blockchain lock poisoned: {}", e);
+                        tracing::error!("Blockchain lock poisoned: {}", e);
                         e.into_inner()
                     }
                 };
                 bc.add_block(vec![tx.clone()], Some(server_addr.clone()));
                 if let Err(e) = save_chain(&bc, &chain_dir) {
-                    eprintln!("[STORAGE] Failed to save chain: {}", e);
+                    tracing::error!("[STORAGE] Failed to save chain: {}", e);
                 }
 
                 let last_block = match bc.chain.last() {
                     Some(b) => b.clone(),
                     None => {
-                        eprintln!("Blockchain empty when broadcasting");
+                        tracing::error!("Blockchain empty when broadcasting");
                         continue;
                     }
                 };
@@ -201,26 +205,26 @@ async fn main() {
                 if !peers.contains(peer_addr) {
                     peers.add_peer(peer_addr);
                     let _ = peers.save_to_file(&peers_file);
-                    println!("Added peer: {}. Peers now: {:?}", peer_addr, peers.all());
+                    tracing::info!("Added peer: {}. Peers now: {:?}", peer_addr, peers.all());
                 } else {
-                    println!("Peer {} already present.", peer_addr);
+                    tracing::info!("Peer {} already present.", peer_addr);
                 }
             }
             "remove" if parts.len() == 2 => {
                 let peer_addr = parts[1];
                 peers.remove_peer(peer_addr);
                 let _ = peers.save_to_file(&peers_file);
-                println!("Removed peer: {}. Remaining peers: {:?}", peer_addr, peers.all());
+                tracing::info!("Removed peer: {}. Remaining peers: {:?}", peer_addr, peers.all());
             }
             "list" => {
-                println!("Peers: {:?}", peers.all());
+                tracing::info!("Peers: {:?}", peers.all());
             }
             "quit" | "exit" => {
-                println!("Node shutting down.");
+                tracing::info!("Node shutting down.");
                 let _ = peers.save_to_file(&peers_file);
                 break;
             }
-            _ => println!("Unrecognized. Use: tx <recipient> <amount> | add <peer_addr> | remove <peer_addr> | list | quit"),
+            _ => tracing::info!("Unrecognized. Use: tx <recipient> <amount> | add <peer_addr> | remove <peer_addr> | list | quit"),
         }
     }
 }
