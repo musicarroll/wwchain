@@ -14,9 +14,9 @@ use tokio::task;
 
 use crate::block::Block;
 use crate::blockchain::{Blockchain, DIFFICULTY_PREFIX};
+use crate::mempool::Mempool;
 use crate::peer::PeerList;
 use crate::transaction::Transaction;
-use crate::mempool::Mempool;
 
 /// Current protocol version understood by this node
 pub const PROTOCOL_VERSION: u8 = 1;
@@ -292,7 +292,10 @@ pub fn handle_client_with_chain(
                         // Optionally: append if valid and next block
                     }
                     NetworkMessage::ChainRequest(requestor_addr) => {
-                        tracing::info!("[SERIALIZED] Received ChainRequest from {}", requestor_addr);
+                        tracing::info!(
+                            "[SERIALIZED] Received ChainRequest from {}",
+                            requestor_addr
+                        );
                         let chain = match blockchain.lock() {
                             Ok(c) => c,
                             Err(e) => {
@@ -428,7 +431,10 @@ pub async fn handle_client_with_chain(
                         }
                     }
                     NetworkMessage::ChainRequest(requestor_addr) => {
-                        tracing::info!("[SERIALIZED] Received ChainRequest from {}", requestor_addr);
+                        tracing::info!(
+                            "[SERIALIZED] Received ChainRequest from {}",
+                            requestor_addr
+                        );
                         let chain_blocks = {
                             let chain = match blockchain.lock() {
                                 Ok(c) => c,
@@ -909,9 +915,16 @@ mod tests {
         let sk1_arc = Arc::new(node1_sk);
         let server1_sk = sk1_arc.clone();
         let server1 = tokio::spawn(async move {
-            start_server_with_chain(&addr1_str, server1_bc, server1_peers, server1_mp_clone, addr1_my, server1_sk)
-                .await
-                .unwrap();
+            start_server_with_chain(
+                &addr1_str,
+                server1_bc,
+                server1_peers,
+                server1_mp_clone,
+                addr1_my,
+                server1_sk,
+            )
+            .await
+            .unwrap();
         });
 
         let addr2_str = addr2.to_string();
@@ -924,9 +937,16 @@ mod tests {
         let sk2_arc = Arc::new(node2_sk);
         let server2_sk = sk2_arc.clone();
         let server2 = tokio::spawn(async move {
-            start_server_with_chain(&addr2_str, server2_bc, server2_peers, server2_mp_clone, addr2_my, server2_sk)
-                .await
-                .unwrap();
+            start_server_with_chain(
+                &addr2_str,
+                server2_bc,
+                server2_peers,
+                server2_mp_clone,
+                addr2_my,
+                server2_sk,
+            )
+            .await
+            .unwrap();
         });
 
         // Give the servers time to start
@@ -1022,7 +1042,15 @@ mod tests {
         let sk_clone = sk.clone();
         let server = tokio::spawn(async move {
             if let Ok((stream, _)) = listener.accept().await {
-                handle_client_with_chain(stream, bc_clone, peers_clone, mp_clone, addr_str, sk_clone).await;
+                handle_client_with_chain(
+                    stream,
+                    bc_clone,
+                    peers_clone,
+                    mp_clone,
+                    addr_str,
+                    sk_clone,
+                )
+                .await;
             }
         });
 
@@ -1052,7 +1080,15 @@ mod tests {
         let sk_clone = sk.clone();
         let server = tokio::spawn(async move {
             if let Ok((stream, _)) = listener.accept().await {
-                handle_client_with_chain(stream, bc_clone, peers_clone, mp_clone, addr_str, sk_clone).await;
+                handle_client_with_chain(
+                    stream,
+                    bc_clone,
+                    peers_clone,
+                    mp_clone,
+                    addr_str,
+                    sk_clone,
+                )
+                .await;
             }
         });
 
@@ -1071,9 +1107,13 @@ mod tests {
         };
         tx.sign(&tx_sk);
 
-        send_message(&addr.to_string(), &NetworkMessage::Transaction(tx.clone()), &sk)
-            .await
-            .unwrap();
+        send_message(
+            &addr.to_string(),
+            &NetworkMessage::Transaction(tx.clone()),
+            &sk,
+        )
+        .await
+        .unwrap();
 
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(mempool.lock().unwrap().pending, vec![tx]);
@@ -1098,7 +1138,15 @@ mod tests {
         let sk_clone = sk.clone();
         let server = tokio::spawn(async move {
             if let Ok((stream, _)) = listener.accept().await {
-                handle_client_with_chain(stream, bc_clone, peers_clone, mp_clone, addr_str, sk_clone).await;
+                handle_client_with_chain(
+                    stream,
+                    bc_clone,
+                    peers_clone,
+                    mp_clone,
+                    addr_str,
+                    sk_clone,
+                )
+                .await;
             }
         });
 
@@ -1116,9 +1164,13 @@ mod tests {
         };
         tx.sign(&tx_sk);
 
-        send_message(&addr.to_string(), &NetworkMessage::Transaction(tx.clone()), &sk)
-            .await
-            .unwrap();
+        send_message(
+            &addr.to_string(),
+            &NetworkMessage::Transaction(tx.clone()),
+            &sk,
+        )
+        .await
+        .unwrap();
 
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(mempool.lock().unwrap().pending, vec![tx]);
@@ -1159,5 +1211,17 @@ mod tests {
         let peerlist = Arc::new(PeerList::new());
         perform_handshake(&addr.to_string(), "me", peerlist.clone(), &sk_client).await;
         assert!(peerlist.all().len() >= 200);
+    }
+
+    #[test]
+    fn signed_message_verify_roundtrip() {
+        let sk = SecretKey::from_slice(&[1u8; 32]).unwrap();
+        let msg = NetworkMessage::Text("hello".into());
+        let signed = SignedMessage::new(msg.clone(), &sk);
+        assert!(signed.verify());
+
+        let mut tampered = signed.clone();
+        tampered.message = VersionedMessage::new(NetworkMessage::Text("bye".into()));
+        assert!(!tampered.verify());
     }
 }

@@ -108,4 +108,32 @@ mod tests {
         tx.amount = 2;
         assert!(!tx.verify());
     }
+
+    #[test]
+    fn verify_fails_with_garbage_signature() {
+        let mut tx = Transaction {
+            sender: "deadbeef".into(),
+            recipient: "bob".into(),
+            amount: 1,
+            signature: Some("zz".into()),
+        };
+        assert!(!tx.verify());
+    }
+
+    #[test]
+    fn verify_fails_with_invalid_pubkey() {
+        let secp = Secp256k1::new();
+        let mut rng = OsRng;
+        let mut sk_bytes = [0u8; 32];
+        rng.fill_bytes(&mut sk_bytes);
+        let sk = SecretKey::from_slice(&sk_bytes).unwrap();
+        let mut tx = Transaction {
+            sender: "ff".into(),
+            recipient: "bob".into(),
+            amount: 1,
+            signature: None,
+        };
+        tx.sign(&sk);
+        assert!(!tx.verify());
+    }
 }
