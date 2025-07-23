@@ -51,6 +51,14 @@ Each node will print received messages and you can send transactions via the int
 The prompt also accepts a few commands like `add`, `remove`, `list` and `balance`.
 Use `balance` at any time to print your wallet's current balance.
 
+### Wallet encryption
+
+Set the `WALLET_PASSWORD` environment variable before starting a node to
+encrypt the wallet's private key. The file will then be written with an
+`enc:` prefix and must be decrypted using the same password on the next
+run. Without the variable the key is stored as plain hex for backward
+compatibility.
+
 ## Chain persistence
 
 Blocks are now stored in a [RocksDB](https://crates.io/crates/rocksdb) database. The database lives in a directory (default `chain_db`) which can be changed with the `--chain-dir` argument. Each block is written atomically so crashes cannot corrupt previously committed data.
