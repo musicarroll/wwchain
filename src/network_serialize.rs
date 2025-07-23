@@ -117,7 +117,7 @@ impl NetworkMessage {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SignedMessage {
     pub message: VersionedMessage,
     pub signature: String,
