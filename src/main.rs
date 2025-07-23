@@ -182,6 +182,10 @@ async fn main() {
         let addr = server_addr.clone();
         let sk = secret_key.clone();
         let chain_dir = chain_dir.clone();
+        #[cfg(feature = "tls")]
+        let cert_opt = tls_cert.clone();
+        #[cfg(feature = "tls")]
+        let key_opt = tls_key.clone();
         tokio::spawn(async move {
             loop {
                 sleep(Duration::from_secs(1)).await;
