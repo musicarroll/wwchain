@@ -86,6 +86,10 @@ documentation with `cargo doc`.
 ## Security/Disclaimer
 
 This prototype is for learning and experimentation only. It has not been audited or hardened and should **not** be used to manage real cryptocurrency or any sensitive data.
+The cryptographic primitives are provided by the well-vetted
+[`sha2`](https://crates.io/crates/sha2) and
+[`secp256k1`](https://crates.io/crates/secp256k1) crates, but the overall
+application has not been formally reviewed.
 
 ## License
 
