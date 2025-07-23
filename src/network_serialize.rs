@@ -12,6 +12,21 @@ use tokio::net::{TcpListener, TcpStream};
 #[cfg(not(feature = "sync"))]
 use tokio::task;
 
+#[cfg(feature = "tls")]
+use rustls::{
+    self, client::ServerCertVerified, client::ServerCertVerifier, Certificate, PrivateKey,
+};
+#[cfg(feature = "tls")]
+use rustls_pemfile::{certs, pkcs8_private_keys};
+#[cfg(feature = "tls")]
+use std::fs::File;
+#[cfg(feature = "tls")]
+use std::io::BufReader;
+#[cfg(feature = "tls")]
+use std::sync::Arc as StdArc;
+#[cfg(feature = "tls")]
+use tokio_rustls::{TlsAcceptor, TlsConnector, TlsStream};
+
 use crate::block::Block;
 use crate::blockchain::{Blockchain, DIFFICULTY_PREFIX};
 use crate::mempool::Mempool;
@@ -36,8 +51,57 @@ fn prefix_with_length(mut data: Vec<u8>) -> Vec<u8> {
     out
 }
 
+#[cfg(feature = "tls")]
+struct NoVerifier;
+#[cfg(feature = "tls")]
+impl ServerCertVerifier for NoVerifier {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &Certificate,
+        _intermediates: &[Certificate],
+        _server_name: &rustls::client::ServerName,
+        _scts: &mut dyn Iterator<Item = &[u8]>,
+        _ocsp_response: &[u8],
+        _now: std::time::SystemTime,
+    ) -> Result<ServerCertVerified, rustls::Error> {
+        Ok(ServerCertVerified::assertion())
+    }
+}
+
+#[cfg(feature = "tls")]
+fn load_tls_acceptor(cert: &str, key: &str) -> io::Result<TlsAcceptor> {
+    let cert_file = &mut BufReader::new(File::open(cert)?);
+    let key_file = &mut BufReader::new(File::open(key)?);
+    let cert_chain = certs(cert_file)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid cert"))?
+        .into_iter()
+        .map(Certificate)
+        .collect();
+    let mut keys = pkcs8_private_keys(key_file)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid key"))?;
+    let key = PrivateKey(keys.remove(0));
+    let config = rustls::ServerConfig::builder()
+        .with_safe_defaults()
+        .with_no_client_auth()
+        .with_single_cert(cert_chain, key)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("{:?}", e)))?;
+    Ok(TlsAcceptor::from(StdArc::new(config)))
+}
+
+#[cfg(feature = "tls")]
+pub fn create_tls_connector() -> TlsConnector {
+    let config = rustls::ClientConfig::builder()
+        .with_safe_defaults()
+        .with_custom_certificate_verifier(StdArc::new(NoVerifier))
+        .with_no_client_auth();
+    TlsConnector::from(StdArc::new(config))
+}
+
 #[cfg(not(feature = "sync"))]
-async fn read_length_prefixed(stream: &mut TcpStream) -> io::Result<Vec<u8>> {
+async fn read_length_prefixed<S>(stream: &mut S) -> io::Result<Vec<u8>>
+where
+    S: AsyncReadExt + Unpin,
+{
     let mut len_buf = [0u8; 4];
     stream.read_exact(&mut len_buf).await?;
     let len = u32::from_be_bytes(len_buf) as usize;
@@ -346,14 +410,16 @@ pub fn handle_client_with_chain(
 }
 
 #[cfg(not(feature = "sync"))]
-pub async fn handle_client_with_chain(
-    mut stream: TcpStream,
+pub async fn handle_client_with_chain<S>(
+    mut stream: S,
     blockchain: Arc<Mutex<Blockchain>>,
     peers: Arc<PeerList>,
     mempool: Arc<Mutex<Mempool>>,
     my_addr: String,
     sk: Arc<SecretKey>,
-) {
+) where
+    S: AsyncReadExt + AsyncWriteExt + Unpin,
+{
     match read_length_prefixed(&mut stream).await {
         Ok(buffer) => {
             if let Ok(signed) = serde_json::from_slice::<SignedMessage>(&buffer) {
@@ -536,6 +602,42 @@ pub async fn start_server_with_chain(
     Ok(())
 }
 
+#[cfg(all(not(feature = "sync"), feature = "tls"))]
+pub async fn start_tls_server_with_chain(
+    addr: &str,
+    blockchain: Arc<Mutex<Blockchain>>,
+    peers: Arc<PeerList>,
+    mempool: Arc<Mutex<Mempool>>,
+    my_addr: String,
+    sk: Arc<SecretKey>,
+    cert_path: &str,
+    key_path: &str,
+) -> io::Result<()> {
+    let acceptor = load_tls_acceptor(cert_path, key_path)?;
+    let acceptor = StdArc::new(acceptor);
+    let listener = TcpListener::bind(addr).await?;
+    tracing::info!("[SERIALIZED] TLS server listening on {}", addr);
+    loop {
+        let (stream, _) = listener.accept().await?;
+        let bc = blockchain.clone();
+        let p = peers.clone();
+        let me = my_addr.clone();
+        let mp = mempool.clone();
+        let sk_clone = sk.clone();
+        let acceptor = acceptor.clone();
+        task::spawn(async move {
+            match acceptor.accept(stream).await {
+                Ok(tls_stream) => {
+                    handle_client_with_chain(tls_stream, bc, p, mp, me, sk_clone).await;
+                }
+                Err(e) => tracing::error!("TLS accept error: {}", e),
+            }
+        });
+    }
+    #[allow(unreachable_code)]
+    Ok(())
+}
+
 #[cfg(feature = "sync")]
 pub fn send_message(addr: &str, msg: &NetworkMessage, sk: &SecretKey) -> io::Result<()> {
     let mut stream = TcpStream::connect(addr)?;
@@ -568,6 +670,31 @@ pub async fn send_message(addr: &str, msg: &NetworkMessage, sk: &SecretKey) -> i
     Ok(())
 }
 
+#[cfg(all(not(feature = "sync"), feature = "tls"))]
+pub async fn send_tls_message(
+    addr: &str,
+    msg: &NetworkMessage,
+    sk: &SecretKey,
+    connector: &TlsConnector,
+) -> io::Result<()> {
+    let host = addr.split(':').next().unwrap_or("localhost");
+    let server_name = rustls::ServerName::try_from(host)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid host"))?;
+    let stream = TcpStream::connect(addr).await?;
+    let mut stream = connector.connect(server_name, stream).await?;
+    let signed = SignedMessage::new(msg.clone(), sk);
+    let buf = serde_json::to_vec(&signed)?;
+    let buf = prefix_with_length(buf);
+    stream.write_all(&buf).await?;
+    let mut buffer = [0u8; 4096];
+    let size = stream.read(&mut buffer).await?;
+    tracing::info!(
+        "[SERIALIZED] Server responded: {}",
+        String::from_utf8_lossy(&buffer[..size])
+    );
+    Ok(())
+}
+
 #[cfg(feature = "sync")]
 pub fn broadcast_message(peers: Arc<PeerList>, msg: &NetworkMessage, sk: &SecretKey) {
     for peer_addr in peers.all() {
@@ -581,6 +708,20 @@ pub fn broadcast_message(peers: Arc<PeerList>, msg: &NetworkMessage, sk: &Secret
 pub async fn broadcast_message(peers: Arc<PeerList>, msg: &NetworkMessage, sk: &SecretKey) {
     for peer_addr in peers.all() {
         if let Err(e) = send_message(&peer_addr, msg, sk).await {
+            tracing::error!("Failed to send to {}: {}", peer_addr, e);
+        }
+    }
+}
+
+#[cfg(all(not(feature = "sync"), feature = "tls"))]
+pub async fn broadcast_tls_message(
+    peers: Arc<PeerList>,
+    msg: &NetworkMessage,
+    sk: &SecretKey,
+    connector: &TlsConnector,
+) {
+    for peer_addr in peers.all() {
+        if let Err(e) = send_tls_message(&peer_addr, msg, sk, connector).await {
             tracing::error!("Failed to send to {}: {}", peer_addr, e);
         }
     }
@@ -622,6 +763,40 @@ pub async fn perform_handshake(addr: &str, my_addr: &str, peers: Arc<PeerList>, 
                 if resp.message.version == PROTOCOL_VERSION && resp.verify() {
                     if let NetworkMessage::PeerList(list) = resp.message.payload {
                         peers.merge(&list);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(all(not(feature = "sync"), feature = "tls"))]
+pub async fn perform_tls_handshake(
+    addr: &str,
+    my_addr: &str,
+    peers: Arc<PeerList>,
+    sk: &SecretKey,
+    connector: &TlsConnector,
+) {
+    if let Ok(stream) = TcpStream::connect(addr).await {
+        let host = addr.split(':').next().unwrap_or("localhost");
+        let server_name = match rustls::ServerName::try_from(host) {
+            Ok(n) => n,
+            Err(_) => return,
+        };
+        if let Ok(mut stream) = connector.connect(server_name, stream).await {
+            let signed = SignedMessage::new(NetworkMessage::Handshake(my_addr.to_string()), sk);
+            let req_buf = serde_json::to_vec(&signed).expect("serialize");
+            let req_buf = prefix_with_length(req_buf);
+            if stream.write_all(&req_buf).await.is_err() {
+                return;
+            }
+            if let Ok(buffer) = read_length_prefixed(&mut stream).await {
+                if let Ok(resp) = serde_json::from_slice::<SignedMessage>(&buffer) {
+                    if resp.message.version == PROTOCOL_VERSION && resp.verify() {
+                        if let NetworkMessage::PeerList(list) = resp.message.payload {
+                            peers.merge(&list);
+                        }
                     }
                 }
             }
@@ -743,6 +918,72 @@ pub async fn request_chain_and_reconcile(
                 }
             }
             Err(e) => tracing::error!("[RECONCILE] Failed to read chain response: {}", e),
+        }
+    } else {
+        tracing::error!("[RECONCILE] Failed to connect to peer for chain request.");
+    }
+}
+
+#[cfg(all(not(feature = "sync"), feature = "tls"))]
+pub async fn request_chain_and_reconcile_tls(
+    addr: &str,
+    blockchain: Arc<Mutex<Blockchain>>,
+    my_addr: &str,
+    sk: &SecretKey,
+    connector: &TlsConnector,
+) {
+    tracing::info!("[RECONCILE] Trying to connect to >{}<", addr);
+    let req = NetworkMessage::ChainRequest(my_addr.to_string());
+    if let Ok(stream) = TcpStream::connect(addr.trim()).await {
+        let host = addr.split(':').next().unwrap_or("localhost");
+        let server_name = match rustls::ServerName::try_from(host) {
+            Ok(n) => n,
+            Err(_) => return,
+        };
+        if let Ok(mut stream) = connector.connect(server_name, stream).await {
+            let signed = SignedMessage::new(req, sk);
+            let req_buf = serde_json::to_vec(&signed).expect("serialize");
+            let req_buf = prefix_with_length(req_buf);
+            if let Err(e) = stream.write_all(&req_buf).await {
+                tracing::error!("[RECONCILE] Failed to send chain request: {}", e);
+                return;
+            }
+            match read_length_prefixed(&mut stream).await {
+                Ok(buffer) => {
+                    if let Ok(signed) = serde_json::from_slice::<SignedMessage>(&buffer) {
+                        if signed.message.version != PROTOCOL_VERSION {
+                            tracing::error!(
+                                "[RECONCILE] Unsupported protocol version {}",
+                                signed.message.version
+                            );
+                            return;
+                        }
+                        if !signed.verify() {
+                            tracing::error!("[RECONCILE] Invalid signature in chain response");
+                            return;
+                        }
+                        if let NetworkMessage::ChainResponse(their_chain) = signed.message.payload {
+                            tracing::info!(
+                                "[RECONCILE] Received chain from peer: {} blocks",
+                                their_chain.len()
+                            );
+                            let mut chain = match blockchain.lock() {
+                                Ok(c) => c,
+                                Err(e) => {
+                                    tracing::error!("Blockchain lock poisoned: {}", e);
+                                    e.into_inner()
+                                }
+                            };
+                            handle_chain_response(&mut chain, their_chain);
+                        } else {
+                            tracing::error!("[RECONCILE] Did not receive a ChainResponse message");
+                        }
+                    } else {
+                        tracing::error!("[RECONCILE] Failed to parse signed message");
+                    }
+                }
+                Err(e) => tracing::error!("[RECONCILE] Failed to read chain response: {}", e),
+            }
         }
     } else {
         tracing::error!("[RECONCILE] Failed to connect to peer for chain request.");

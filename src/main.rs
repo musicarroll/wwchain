@@ -13,11 +13,16 @@ use mempool::Mempool;
 use network_serialize::{
     broadcast_message, perform_handshake, start_server_with_chain, NetworkMessage,
 };
+#[cfg(feature = "tls")]
+use network_serialize::{
+    broadcast_tls_message, create_tls_connector, perform_tls_handshake,
+    request_chain_and_reconcile_tls, start_tls_server_with_chain,
+};
 use peer::PeerList;
 use storage::{load_chain, save_chain};
+use tokio::time::{sleep, Duration};
 use transaction::Transaction;
 use wallet::Wallet;
-use tokio::time::{sleep, Duration};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -37,6 +42,16 @@ struct Cli {
     /// Directory for the blockchain database
     #[arg(long, default_value = "chain_db")]
     chain_dir: String,
+
+    /// TLS certificate for secure connections
+    #[cfg(feature = "tls")]
+    #[arg(long)]
+    tls_cert: Option<String>,
+
+    /// TLS private key for secure connections
+    #[cfg(feature = "tls")]
+    #[arg(long)]
+    tls_key: Option<String>,
 }
 use std::sync::{Arc, Mutex};
 use tracing_subscriber::EnvFilter;
@@ -52,6 +67,10 @@ async fn main() {
     let node_name = cli.node_name;
     let peers_csv = cli.peers;
     let chain_dir = cli.chain_dir;
+    #[cfg(feature = "tls")]
+    let tls_cert = cli.tls_cert.clone();
+    #[cfg(feature = "tls")]
+    let tls_key = cli.tls_key.clone();
     let server_addr = format!("127.0.0.1:{}", port);
 
     // --- Load or create wallet ---
@@ -109,7 +128,21 @@ async fn main() {
         let addr = server_addr.clone();
         let me = server_addr.clone();
         let sk = secret_key.clone();
+        #[cfg(feature = "tls")]
+        let cert_opt = tls_cert.clone();
+        #[cfg(feature = "tls")]
+        let key_opt = tls_key.clone();
         tokio::spawn(async move {
+            #[cfg(feature = "tls")]
+            if let (Some(cert), Some(key)) = (cert_opt, key_opt) {
+                if let Err(e) =
+                    start_tls_server_with_chain(&addr, bc, p, mp, me, Arc::new(sk), &cert, &key)
+                        .await
+                {
+                    tracing::error!("Server error: {}", e);
+                }
+                return;
+            }
             if let Err(e) = start_server_with_chain(&addr, bc, p, mp, me, Arc::new(sk)).await {
                 tracing::error!("Server error: {}", e);
             }
@@ -117,7 +150,23 @@ async fn main() {
     }
 
     // Perform handshake with known peers
+    #[cfg(feature = "tls")]
+    let connector = create_tls_connector();
     for peer_addr in peers.all() {
+        #[cfg(feature = "tls")]
+        {
+            if tls_cert.is_some() && tls_key.is_some() {
+                perform_tls_handshake(
+                    &peer_addr,
+                    &server_addr,
+                    peers.clone(),
+                    &secret_key,
+                    &connector,
+                )
+                .await;
+                continue;
+            }
+        }
         perform_handshake(&peer_addr, &server_addr, peers.clone(), &secret_key).await;
     }
     let _ = peers.save_to_file(&peers_file);
@@ -144,7 +193,9 @@ async fn main() {
                         Some(m.drain())
                     }
                 };
-                let Some(txs) = txs_opt else { continue; };
+                let Some(txs) = txs_opt else {
+                    continue;
+                };
                 let block_opt = {
                     let mut chain = bc.lock().unwrap();
                     if chain.add_block(txs, Some(addr.clone())) {
@@ -157,14 +208,48 @@ async fn main() {
                     }
                 };
                 if let Some(block) = block_opt {
-                    broadcast_message(peers_clone.clone(), &NetworkMessage::Block(block), &sk).await;
+                    #[cfg(feature = "tls")]
+                    if let (Some(cert), Some(key)) = (cert_opt.clone(), key_opt.clone()) {
+                        let connector = create_tls_connector();
+                        broadcast_tls_message(
+                            peers_clone.clone(),
+                            &NetworkMessage::Block(block),
+                            &sk,
+                            &connector,
+                        )
+                        .await;
+                    } else {
+                        broadcast_message(peers_clone.clone(), &NetworkMessage::Block(block), &sk)
+                            .await;
+                    }
+                    #[cfg(not(feature = "tls"))]
+                    broadcast_message(peers_clone.clone(), &NetworkMessage::Block(block), &sk)
+                        .await;
                 }
             }
         });
     }
 
-
     // --- Broadcast a greeting and a transaction to all peers ---
+    #[cfg(feature = "tls")]
+    if let (Some(_), Some(_)) = (tls_cert.as_ref(), tls_key.as_ref()) {
+        let connector = create_tls_connector();
+        broadcast_tls_message(
+            peers.clone(),
+            &NetworkMessage::Text(format!("Hello from {}!", node_name)),
+            &secret_key,
+            &connector,
+        )
+        .await;
+    } else {
+        broadcast_message(
+            peers.clone(),
+            &NetworkMessage::Text(format!("Hello from {}!", node_name)),
+            &secret_key,
+        )
+        .await;
+    }
+    #[cfg(not(feature = "tls"))]
     broadcast_message(
         peers.clone(),
         &NetworkMessage::Text(format!("Hello from {}!", node_name)),
@@ -178,6 +263,20 @@ async fn main() {
         signature: None,
     };
     tx.sign(&secret_key);
+    #[cfg(feature = "tls")]
+    if let (Some(_), Some(_)) = (tls_cert.as_ref(), tls_key.as_ref()) {
+        let connector = create_tls_connector();
+        broadcast_tls_message(
+            peers.clone(),
+            &NetworkMessage::Transaction(tx),
+            &secret_key,
+            &connector,
+        )
+        .await;
+    } else {
+        broadcast_message(peers.clone(), &NetworkMessage::Transaction(tx), &secret_key).await;
+    }
+    #[cfg(not(feature = "tls"))]
     broadcast_message(peers.clone(), &NetworkMessage::Transaction(tx), &secret_key).await;
 
     use std::io::{self, Write};
@@ -227,6 +326,14 @@ async fn main() {
                         }
                     };
                     drop(bc); // unlock before broadcast
+                    #[cfg(feature = "tls")]
+                    if let (Some(_), Some(_)) = (tls_cert.as_ref(), tls_key.as_ref()) {
+                        let connector = create_tls_connector();
+                        broadcast_tls_message(peers.clone(), &NetworkMessage::Block(last_block), &secret_key, &connector).await;
+                    } else {
+                        broadcast_message(peers.clone(), &NetworkMessage::Block(last_block), &secret_key).await;
+                    }
+                    #[cfg(not(feature = "tls"))]
                     broadcast_message(peers.clone(), &NetworkMessage::Block(last_block), &secret_key).await;
                 } else {
                     tracing::error!("Failed to add block. Possibly insufficient funds.");
