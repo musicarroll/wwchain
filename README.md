@@ -20,6 +20,18 @@ Launch a node with optional arguments:
 cargo run -- --port <PORT> --node-name <NAME> --peers <PEER1,PEER2,...> --chain-dir <DIR>
 ```
 
+When the `tls` feature is enabled you can also provide certificate paths:
+
+```bash
+cargo run --features tls -- --tls-cert cert.pem --tls-key key.pem
+```
+
+Self-signed certificates for development can be generated with:
+
+```bash
+openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem -out cert.pem -days 365
+```
+
 - `--port` - TCP port to listen on (default: 6001).
 - `--node-name` - friendly name used in prompts (default: "node1").
 - `--peers` - comma separated list of peer addresses to connect to at startup.

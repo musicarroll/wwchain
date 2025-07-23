@@ -13,6 +13,9 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-uti
 rocksdb = "0.21"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+tokio-rustls = { version = "0.24", optional = true }
+rustls = { version = "0.21", features = ["dangerous_configuration"], optional = true }
+rustls-pemfile = { version = "1.0", optional = true }
 
 # Arc/Mutex/threading are built-in (std), no crate needed.
 
@@ -30,3 +33,4 @@ secp256k1 = "0.28"
 
 [features]
 sync = []
+tls = ["tokio-rustls", "rustls", "rustls-pemfile"]

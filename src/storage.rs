@@ -76,12 +76,12 @@ pub fn save_chain(chain: &Blockchain, path: &str) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use crate::transaction::Transaction;
     use hex;
     use rand::rngs::OsRng;
     use rand::RngCore;
     use secp256k1::{PublicKey, Secp256k1, SecretKey};
-    use crate::transaction::Transaction;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn load_chain_rejects_invalid() {
