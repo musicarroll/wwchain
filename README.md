@@ -63,6 +63,11 @@ Each node will print received messages and you can send transactions via the int
 The prompt also accepts a few commands like `add`, `remove`, `list` and `balance`.
 Use `balance` at any time to print your wallet's current balance.
 
+Behind the scenes the wallet module manages a secp256k1 key pair and derives
+your address. It can also build and sign transactions using the current
+blockchain state, so submitting a `tx` command automatically produces a
+properly signed transaction.
+
 ### Wallet encryption
 
 Set the `WALLET_PASSWORD` environment variable before starting a node to

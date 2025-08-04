@@ -1,3 +1,5 @@
+use crate::blockchain::Blockchain;
+use crate::transaction::Transaction;
 use rand::rngs::OsRng;
 use rand::RngCore;
 use secp256k1::{PublicKey, Secp256k1, SecretKey};
@@ -83,6 +85,34 @@ impl Wallet {
     pub fn address(&self) -> &str {
         &self.address
     }
+
+    /// Return the current balance of this wallet as recorded on `blockchain`.
+    pub fn balance(&self, blockchain: &Blockchain) -> u64 {
+        blockchain.balances.get(&self.address).copied().unwrap_or(0)
+    }
+
+    /// Construct and sign a transaction spending `amount` to `recipient`.
+    /// Returns `None` if the wallet's balance is insufficient.
+    pub fn create_transaction(
+        &self,
+        recipient: String,
+        amount: u64,
+        blockchain: &Blockchain,
+    ) -> Option<Transaction> {
+        if self.balance(blockchain) < amount {
+            return None;
+        }
+        let nonce = blockchain.nonces.get(&self.address).copied().unwrap_or(0);
+        let mut tx = Transaction {
+            sender: self.address.clone(),
+            recipient,
+            amount,
+            nonce,
+            signature: None,
+        };
+        tx.sign(&self.secret_key);
+        Some(tx)
+    }
 }
 
 #[cfg(test)]
@@ -130,6 +160,56 @@ mod tests {
         let secp = Secp256k1::new();
         let pk = PublicKey::from_secret_key(&secp, wallet.secret_key());
         assert_eq!(wallet.address(), hex::encode(pk.serialize()));
+        fs::remove_dir_all(&dir).unwrap();
+        std::env::remove_var("WALLET_PASSWORD");
+    }
+
+    #[test]
+    fn create_transaction_uses_balance_and_nonce() {
+        let dir = std::env::temp_dir().join(format!(
+            "wallet_{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("wallet.key");
+        std::env::set_var("WALLET_PASSWORD", "testpass");
+        let wallet = Wallet::load_or_create(&path).unwrap();
+        // Credit wallet via genesis block
+        let bc = Blockchain::new(Some((wallet.address().to_string(), 50)));
+        assert_eq!(wallet.balance(&bc), 50);
+        let tx = wallet
+            .create_transaction("bob".to_string(), 10, &bc)
+            .expect("transaction");
+        assert_eq!(tx.sender, wallet.address());
+        assert_eq!(tx.recipient, "bob");
+        assert_eq!(tx.amount, 10);
+        assert_eq!(tx.nonce, 0);
+        assert!(tx.verify());
+        fs::remove_dir_all(&dir).unwrap();
+        std::env::remove_var("WALLET_PASSWORD");
+    }
+
+    #[test]
+    fn create_transaction_fails_with_insufficient_balance() {
+        let dir = std::env::temp_dir().join(format!(
+            "wallet_{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("wallet.key");
+        std::env::set_var("WALLET_PASSWORD", "testpass");
+        let wallet = Wallet::load_or_create(&path).unwrap();
+        let bc = Blockchain::new(None);
+        assert_eq!(wallet.balance(&bc), 0);
+        assert!(wallet
+            .create_transaction("bob".to_string(), 1, &bc)
+            .is_none());
         fs::remove_dir_all(&dir).unwrap();
         std::env::remove_var("WALLET_PASSWORD");
     }
