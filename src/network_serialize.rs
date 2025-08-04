@@ -246,7 +246,7 @@ pub fn handle_chain_response(local_chain: &mut Blockchain, their_chain: Vec<Bloc
             let curr = &their_chain[i];
             if curr.prev_hash != prev.hash
                 || curr.hash != curr.calculate_hash()
-                || !curr.hash.starts_with(DIFFICULTY_PREFIX)
+                || !curr.is_puzzle_valid(DIFFICULTY_PREFIX)
             {
                 valid = false;
                 break;
@@ -254,7 +254,7 @@ pub fn handle_chain_response(local_chain: &mut Blockchain, their_chain: Vec<Bloc
         }
         if valid {
             if their_chain[0].hash != their_chain[0].calculate_hash()
-                || !their_chain[0].hash.starts_with(DIFFICULTY_PREFIX)
+                || !their_chain[0].is_puzzle_valid(DIFFICULTY_PREFIX)
             {
                 valid = false;
             }
