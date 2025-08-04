@@ -36,6 +36,9 @@ pub fn load_chain(path: &str) -> io::Result<Blockchain> {
     let mut chain = Blockchain {
         chain: blocks,
         balances: HashMap::new(),
+        puzzle_ownership: HashMap::new(),
+        puzzle_attempts: HashMap::new(),
+        total_supply: 0,
     };
     if !chain.is_valid_chain() {
         return Err(io::Error::new(ErrorKind::InvalidData, "invalid blockchain"));
