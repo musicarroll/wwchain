@@ -96,8 +96,8 @@ mod tests {
         let mut opts = Options::default();
         opts.create_if_missing(true);
         let db = DB::open(&opts, &dir).unwrap();
-        let genesis = Block::new(0, 0, vec![], "0".into(), None);
-        let bad_block = Block::new(1, 0, vec![], "wrong".into(), None);
+        let genesis = Block::new(0, 0, vec![], "0".into(), None, 0);
+        let bad_block = Block::new(1, 0, vec![], "wrong".into(), None, 1);
         db.put(0u64.to_le_bytes(), serde_json::to_vec(&genesis).unwrap())
             .unwrap();
         db.put(1u64.to_le_bytes(), serde_json::to_vec(&bad_block).unwrap())

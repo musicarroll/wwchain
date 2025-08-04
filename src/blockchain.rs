@@ -2,6 +2,7 @@ use crate::block::Block;
 use crate::transaction::Transaction;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
+use sha2::{Digest, Sha256};
 
 pub const DIFFICULTY_PREFIX: &str = "0000";
 
@@ -28,6 +29,7 @@ impl Blockchain {
             txs,
             "0".to_string(),
             None, // <-- Genesis block has no sender_addr
+            0,
         );
         genesis_block.mine(DIFFICULTY_PREFIX);
         let mut bc = Blockchain {
@@ -67,7 +69,16 @@ impl Blockchain {
     pub(crate) fn chain_work(chain: &[Block]) -> usize {
         chain
             .iter()
-            .map(|b| b.hash.chars().take_while(|c| *c == '0').count())
+            .map(|b| {
+                let mut hasher = Sha256::new();
+                hasher.update(b.puzzle_id.to_be_bytes());
+                hasher.update(b.puzzle_solution.to_le_bytes());
+                let result = hasher.finalize();
+                hex::encode(result)
+                    .chars()
+                    .take_while(|c| *c == '0')
+                    .count()
+            })
             .sum()
     }
 
@@ -103,7 +114,7 @@ impl Blockchain {
             .unwrap()
             .as_millis();
         let prev_hash = last_block.hash.clone();
-        let mut new_block = Block::new(index, timestamp, transactions, prev_hash, sender_addr);
+        let mut new_block = Block::new(index, timestamp, transactions, prev_hash, sender_addr, index);
         new_block.mine(DIFFICULTY_PREFIX);
         self.chain.push(new_block);
         self.balances = temp_balances;
@@ -115,7 +126,8 @@ impl Blockchain {
             return false;
         }
         let genesis = &self.chain[0];
-        if genesis.hash != genesis.calculate_hash() || !genesis.hash.starts_with(DIFFICULTY_PREFIX)
+        if genesis.hash != genesis.calculate_hash()
+            || !genesis.is_puzzle_valid(DIFFICULTY_PREFIX)
         {
             tracing::info!("Genesis block invalid");
             return false;
@@ -135,7 +147,7 @@ impl Blockchain {
                 tracing::info!("Block {} has invalid hash!", i);
                 return false;
             }
-            if !curr.hash.starts_with(DIFFICULTY_PREFIX) {
+            if !curr.is_puzzle_valid(DIFFICULTY_PREFIX) {
                 tracing::info!("Block {} does not satisfy PoW", i);
                 return false;
             }

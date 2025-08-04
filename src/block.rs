@@ -10,7 +10,8 @@ pub struct Block {
     pub prev_hash: String,
     pub hash: String,
     pub sender_addr: Option<String>,
-    pub nonce: u64,
+    pub puzzle_id: u64,
+    pub puzzle_solution: u64,
 }
 
 impl Block {
@@ -20,6 +21,7 @@ impl Block {
         transactions: Vec<Transaction>,
         prev_hash: String,
         sender_addr: Option<String>, // <-- Add this argument
+        puzzle_id: u64,
     ) -> Self {
         let mut block = Block {
             index,
@@ -28,7 +30,8 @@ impl Block {
             prev_hash,
             hash: String::new(),
             sender_addr, // <-- Use the argument
-            nonce: 0,
+            puzzle_id,
+            puzzle_solution: 0,
         };
         block.hash = block.calculate_hash();
         block
@@ -44,11 +47,23 @@ impl Block {
         hex::encode(result)
     }
 
+    pub fn puzzle_satisfied(id: u64, solution: u64, difficulty_prefix: &str) -> bool {
+        let mut hasher = Sha256::new();
+        hasher.update(id.to_be_bytes());
+        hasher.update(solution.to_le_bytes());
+        let result = hasher.finalize();
+        hex::encode(result).starts_with(difficulty_prefix)
+    }
+
+    pub fn is_puzzle_valid(&self, difficulty_prefix: &str) -> bool {
+        Self::puzzle_satisfied(self.puzzle_id, self.puzzle_solution, difficulty_prefix)
+    }
+
     pub fn mine(&mut self, difficulty_prefix: &str) {
-        while !self.hash.starts_with(difficulty_prefix) {
-            self.nonce += 1;
-            self.hash = self.calculate_hash();
+        while !Self::puzzle_satisfied(self.puzzle_id, self.puzzle_solution, difficulty_prefix) {
+            self.puzzle_solution += 1;
         }
+        self.hash = self.calculate_hash();
     }
 }
 
@@ -64,13 +79,14 @@ mod tests {
             amount: 10,
             signature: None,
         };
-        let block = Block::new(1, 123, vec![tx.clone()], "prev".into(), Some("me".into()));
+        let block = Block::new(1, 123, vec![tx.clone()], "prev".into(), Some("me".into()), 1);
         assert_eq!(block.index, 1);
         assert_eq!(block.timestamp, 123);
         assert_eq!(block.transactions, vec![tx]);
         assert_eq!(block.prev_hash, "prev");
         assert_eq!(block.sender_addr, Some("me".into()));
-        assert_eq!(block.nonce, 0);
+        assert_eq!(block.puzzle_id, 1);
+        assert_eq!(block.puzzle_solution, 0);
         assert_eq!(block.hash, block.calculate_hash());
     }
 
@@ -82,23 +98,24 @@ mod tests {
             amount: 5,
             signature: None,
         };
-        let block = Block::new(2, 456, vec![tx], "prevhash".into(), None);
+        let block = Block::new(2, 456, vec![tx], "prevhash".into(), None, 2);
         let h1 = block.hash.clone();
         let h2 = block.calculate_hash();
         assert_eq!(h1, h2);
     }
 
     #[test]
-    fn test_mine_sets_nonce_and_valid_hash() {
+    fn test_mine_sets_solution_and_valid_hash() {
         let tx = Transaction {
             sender: "x".into(),
             recipient: "y".into(),
             amount: 1,
             signature: None,
         };
-        let mut block = Block::new(1, 1, vec![tx], "0".into(), None);
+        let mut block = Block::new(1, 1, vec![tx], "0".into(), None, 3);
         block.mine("00");
-        assert!(block.hash.starts_with("00"));
-        assert!(block.nonce > 0);
+        assert_eq!(block.hash, block.calculate_hash());
+        assert!(block.puzzle_solution > 0);
+        assert!(block.is_puzzle_valid("00"));
     }
 }
