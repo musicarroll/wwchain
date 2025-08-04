@@ -1035,6 +1035,7 @@ mod tests {
             sender: hex::encode(pk.serialize()),
             recipient: "b".into(),
             amount: 1,
+            nonce: 0,
             signature: None,
         };
         tx.sign(&sk);
@@ -1104,6 +1105,7 @@ mod tests {
             sender: hex::encode(pk.serialize()),
             recipient: "y".into(),
             amount: 5,
+            nonce: 0,
             signature: None,
         };
         tx.sign(&sk);
@@ -1214,6 +1216,7 @@ mod tests {
             sender: hex::encode(pk.serialize()),
             recipient: "b".into(),
             amount: 3,
+            nonce: 0,
             signature: None,
         };
         tx.sign(&sk);
@@ -1265,6 +1268,7 @@ mod tests {
             sender: hex::encode(pk.serialize()),
             recipient: "b".into(),
             amount: 1,
+            nonce: 0,
             signature: None,
         };
         tx.sign(&sk);
@@ -1354,6 +1358,7 @@ mod tests {
             sender: hex::encode(pk.serialize()),
             recipient: "bob".into(),
             amount: 1,
+            nonce: 0,
             signature: None,
         };
         tx.sign(&tx_sk);
@@ -1411,6 +1416,7 @@ mod tests {
             sender: hex::encode(pk.serialize()),
             recipient: "x".repeat(5000),
             amount: 1,
+            nonce: 0,
             signature: None,
         };
         tx.sign(&tx_sk);

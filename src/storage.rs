@@ -38,6 +38,7 @@ pub fn load_chain(path: &str) -> io::Result<Blockchain> {
         balances: HashMap::new(),
         puzzle_ownership: HashMap::new(),
         puzzle_attempts: HashMap::new(),
+        nonces: HashMap::new(),
         total_supply: 0,
         difficulty_prefix: crate::blockchain::DIFFICULTY_PREFIX.to_string(),
     };
@@ -140,6 +141,7 @@ mod tests {
             sender: sender.clone(),
             recipient: "bob".into(),
             amount: 25,
+            nonce: 0,
             signature: None,
         };
         tx.sign(&sk);

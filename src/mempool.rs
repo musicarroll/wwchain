@@ -31,6 +31,7 @@ mod tests {
             sender: "a".into(),
             recipient: "b".into(),
             amount: 2,
+            nonce: 0,
             signature: None,
         };
         mp.add_tx(tx.clone());

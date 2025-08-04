@@ -260,10 +260,18 @@ async fn main() {
         &secret_key,
     )
     .await;
+    let nonce = {
+        let bc = match blockchain.lock() {
+            Ok(b) => b,
+            Err(e) => e.into_inner(),
+        };
+        bc.nonces.get(&my_address).copied().unwrap_or(0)
+    };
     let mut tx = Transaction {
         sender: my_address.clone(),
         recipient: "bob".to_string(),
         amount: 42,
+        nonce,
         signature: None,
     };
     tx.sign(&secret_key);
@@ -307,7 +315,14 @@ async fn main() {
             "tx" if parts.len() == 3 => {
                 let recipient = parts[1].to_string();
                 let amount: u64 = parts[2].parse().unwrap_or(0);
-                let mut tx = Transaction { sender: my_address.clone(), recipient, amount, signature: None };
+                let nonce = {
+                    let bc = match blockchain.lock() {
+                        Ok(b) => b,
+                        Err(e) => e.into_inner(),
+                    };
+                    bc.nonces.get(&my_address).copied().unwrap_or(0)
+                };
+                let mut tx = Transaction { sender: my_address.clone(), recipient, amount, nonce, signature: None };
                 tx.sign(&secret_key);
                 let mut bc = match blockchain.lock() {
                     Ok(b) => b,

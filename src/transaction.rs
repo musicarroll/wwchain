@@ -8,6 +8,7 @@ pub struct Transaction {
     pub sender: String,
     pub recipient: String,
     pub amount: u64,
+    pub nonce: u64,
     pub signature: Option<String>,
 }
 
@@ -17,6 +18,7 @@ impl Transaction {
         hasher.update(&self.sender);
         hasher.update(&self.recipient);
         hasher.update(self.amount.to_be_bytes());
+        hasher.update(self.nonce.to_be_bytes());
         let result = hasher.finalize();
         let mut out = [0u8; 32];
         out.copy_from_slice(&result);
@@ -84,6 +86,7 @@ mod tests {
             sender: hex::encode(pk.serialize()),
             recipient: "bob".into(),
             amount: 5,
+            nonce: 0,
             signature: None,
         };
         tx.sign(&sk);
@@ -102,6 +105,7 @@ mod tests {
             sender: hex::encode(pk.serialize()),
             recipient: "alice".into(),
             amount: 1,
+            nonce: 0,
             signature: None,
         };
         tx.sign(&sk);
@@ -115,6 +119,7 @@ mod tests {
             sender: "deadbeef".into(),
             recipient: "bob".into(),
             amount: 1,
+            nonce: 0,
             signature: Some("zz".into()),
         };
         assert!(!tx.verify());
@@ -131,6 +136,7 @@ mod tests {
             sender: "ff".into(),
             recipient: "bob".into(),
             amount: 1,
+            nonce: 0,
             signature: None,
         };
         tx.sign(&sk);
