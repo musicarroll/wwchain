@@ -39,11 +39,13 @@ pub fn load_chain(path: &str) -> io::Result<Blockchain> {
         puzzle_ownership: HashMap::new(),
         puzzle_attempts: HashMap::new(),
         total_supply: 0,
+        difficulty_prefix: crate::blockchain::DIFFICULTY_PREFIX.to_string(),
     };
     if !chain.is_valid_chain() {
         return Err(io::Error::new(ErrorKind::InvalidData, "invalid blockchain"));
     }
     chain.recompute_balances();
+    chain.recompute_difficulty();
     Ok(chain)
 }
 

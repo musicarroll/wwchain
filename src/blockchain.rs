@@ -5,6 +5,8 @@ use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const DIFFICULTY_PREFIX: &str = "0000";
+const DIFFICULTY_ADJUSTMENT_INTERVAL: usize = 10;
+const TARGET_BLOCK_TIME_MS: u128 = 10_000;
 
 /// Address used to mint new tokens as rewards.
 pub const MINT_ADDRESS: &str = "mint";
@@ -20,6 +22,7 @@ pub struct Blockchain {
     pub puzzle_ownership: HashMap<String, u64>,
     pub puzzle_attempts: HashMap<String, u64>,
     pub total_supply: u64,
+    pub difficulty_prefix: String,
 }
 
 impl Blockchain {
@@ -48,6 +51,7 @@ impl Blockchain {
             puzzle_ownership: HashMap::new(),
             puzzle_attempts: HashMap::new(),
             total_supply: 0,
+            difficulty_prefix: DIFFICULTY_PREFIX.to_string(),
         };
         bc.recompute_balances();
         bc
@@ -180,7 +184,7 @@ impl Blockchain {
             sender_addr.clone(),
             index,
         );
-        new_block.mine(DIFFICULTY_PREFIX);
+        new_block.mine(&self.difficulty_prefix);
         self.chain.push(new_block);
         self.balances = temp_balances;
 
@@ -189,7 +193,44 @@ impl Blockchain {
             *self.puzzle_attempts.entry(addr).or_insert(0) += 1;
         }
         self.total_supply += minted;
+        self.adjust_difficulty();
         true
+    }
+
+    fn adjust_difficulty(&mut self) {
+        let len = self.chain.len();
+        if len <= DIFFICULTY_ADJUSTMENT_INTERVAL {
+            return;
+        }
+        if (len - 1) % DIFFICULTY_ADJUSTMENT_INTERVAL != 0 {
+            return;
+        }
+        let last = &self.chain[len - 1];
+        let prev = &self.chain[len - 1 - DIFFICULTY_ADJUSTMENT_INTERVAL];
+        let actual_time = last.timestamp.saturating_sub(prev.timestamp);
+        let expected_time = TARGET_BLOCK_TIME_MS * DIFFICULTY_ADJUSTMENT_INTERVAL as u128;
+        if actual_time < expected_time / 2 {
+            self.difficulty_prefix.push('0');
+        } else if actual_time > expected_time * 2 && self.difficulty_prefix.len() > 1 {
+            self.difficulty_prefix.pop();
+        }
+    }
+
+    pub fn recompute_difficulty(&mut self) {
+        self.difficulty_prefix = DIFFICULTY_PREFIX.to_string();
+        for i in 1..self.chain.len() {
+            if i % DIFFICULTY_ADJUSTMENT_INTERVAL == 0 {
+                let last = &self.chain[i];
+                let prev = &self.chain[i - DIFFICULTY_ADJUSTMENT_INTERVAL];
+                let actual_time = last.timestamp.saturating_sub(prev.timestamp);
+                let expected_time = TARGET_BLOCK_TIME_MS * DIFFICULTY_ADJUSTMENT_INTERVAL as u128;
+                if actual_time < expected_time / 2 {
+                    self.difficulty_prefix.push('0');
+                } else if actual_time > expected_time * 2 && self.difficulty_prefix.len() > 1 {
+                    self.difficulty_prefix.pop();
+                }
+            }
+        }
     }
 
     pub fn is_valid_chain(&self) -> bool {
@@ -406,5 +447,27 @@ mod tests {
         bc.puzzle_ownership.insert("alice".into(), 2);
         bc.puzzle_attempts.insert("alice".into(), 3);
         assert_eq!(bc.voting_power("alice"), 15);
+    }
+
+    #[test]
+    fn test_difficulty_adjustment() {
+        let mut bc = Blockchain::new(None);
+        let initial = bc.difficulty_prefix.clone();
+        for i in 1..=super::DIFFICULTY_ADJUSTMENT_INTERVAL {
+            let prev_hash = bc.chain.last().unwrap().hash.clone();
+            let block = Block {
+                index: i as u64,
+                timestamp: i as u128, // very fast blocks
+                transactions: vec![],
+                prev_hash,
+                hash: String::new(),
+                sender_addr: None,
+                puzzle_id: i as u64,
+                puzzle_solution: 0,
+            };
+            bc.chain.push(block);
+        }
+        bc.adjust_difficulty();
+        assert!(bc.difficulty_prefix.len() > initial.len());
     }
 }
