@@ -261,6 +261,8 @@ pub fn handle_chain_response(local_chain: &mut Blockchain, their_chain: Vec<Bloc
         }
         if valid {
             local_chain.chain = their_chain;
+            local_chain.recompute_balances();
+            local_chain.recompute_difficulty();
             tracing::info!("[RECONCILE] Local chain updated from peer!");
         } else {
             tracing::info!("[RECONCILE] Received invalid chain, ignoring.");
