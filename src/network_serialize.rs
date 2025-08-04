@@ -28,7 +28,7 @@ use std::sync::Arc as StdArc;
 use tokio_rustls::{TlsAcceptor, TlsConnector, TlsStream};
 
 use crate::block::Block;
-use crate::blockchain::{Blockchain, DIFFICULTY_PREFIX};
+use crate::blockchain::{Blockchain, DIFFICULTY_PREFIX, MINT_ADDRESS};
 use crate::mempool::Mempool;
 use crate::peer::PeerList;
 use crate::transaction::Transaction;
@@ -317,7 +317,11 @@ pub fn handle_client_with_chain(
                     }
                     NetworkMessage::Block(block) => {
                         tracing::info!("[SERIALIZED] Received Block: {:?}", block);
-                        if !block.transactions.iter().all(|tx| tx.verify()) {
+                        if !block
+                            .transactions
+                            .iter()
+                            .all(|tx| tx.sender == MINT_ADDRESS || tx.verify())
+                        {
                             tracing::error!("[SERIALIZED] Block contains invalid transaction");
                             return;
                         }
@@ -457,7 +461,11 @@ pub async fn handle_client_with_chain<S>(
                     }
                     NetworkMessage::Block(block) => {
                         tracing::info!("[SERIALIZED] Received Block: {:?}", block);
-                        if !block.transactions.iter().all(|tx| tx.verify()) {
+                        if !block
+                            .transactions
+                            .iter()
+                            .all(|tx| tx.sender == MINT_ADDRESS || tx.verify())
+                        {
                             tracing::error!("[SERIALIZED] Block contains invalid transaction");
                             return;
                         }
