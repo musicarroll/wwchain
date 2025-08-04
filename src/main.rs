@@ -106,11 +106,7 @@ async fn main() {
             Blockchain::new(Some((my_address.clone(), 100)))
         }
     };
-    let starting_balance = initial_chain
-        .balances
-        .get(&my_address)
-        .copied()
-        .unwrap_or(0);
+    let starting_balance = wallet.balance(&initial_chain);
     tracing::info!(
         "Wallet address {} starting balance {}",
         my_address,
@@ -260,36 +256,29 @@ async fn main() {
         &secret_key,
     )
     .await;
-    let nonce = {
+    if let Some(tx) = {
         let bc = match blockchain.lock() {
             Ok(b) => b,
             Err(e) => e.into_inner(),
         };
-        bc.nonces.get(&my_address).copied().unwrap_or(0)
-    };
-    let mut tx = Transaction {
-        sender: my_address.clone(),
-        recipient: "bob".to_string(),
-        amount: 42,
-        nonce,
-        signature: None,
-    };
-    tx.sign(&secret_key);
-    #[cfg(feature = "tls")]
-    if let (Some(_), Some(_)) = (tls_cert.as_ref(), tls_key.as_ref()) {
-        let connector = create_tls_connector();
-        broadcast_tls_message(
-            peers.clone(),
-            &NetworkMessage::Transaction(tx),
-            &secret_key,
-            &connector,
-        )
-        .await;
-    } else {
+        wallet.create_transaction("bob".to_string(), 42, &bc)
+    } {
+        #[cfg(feature = "tls")]
+        if let (Some(_), Some(_)) = (tls_cert.as_ref(), tls_key.as_ref()) {
+            let connector = create_tls_connector();
+            broadcast_tls_message(
+                peers.clone(),
+                &NetworkMessage::Transaction(tx),
+                &secret_key,
+                &connector,
+            )
+            .await;
+        } else {
+            broadcast_message(peers.clone(), &NetworkMessage::Transaction(tx), &secret_key).await;
+        }
+        #[cfg(not(feature = "tls"))]
         broadcast_message(peers.clone(), &NetworkMessage::Transaction(tx), &secret_key).await;
     }
-    #[cfg(not(feature = "tls"))]
-    broadcast_message(peers.clone(), &NetworkMessage::Transaction(tx), &secret_key).await;
 
     use std::io::{self, Write};
 
@@ -315,15 +304,17 @@ async fn main() {
             "tx" if parts.len() == 3 => {
                 let recipient = parts[1].to_string();
                 let amount: u64 = parts[2].parse().unwrap_or(0);
-                let nonce = {
+                let tx_opt = {
                     let bc = match blockchain.lock() {
                         Ok(b) => b,
                         Err(e) => e.into_inner(),
                     };
-                    bc.nonces.get(&my_address).copied().unwrap_or(0)
+                    wallet.create_transaction(recipient, amount, &bc)
                 };
-                let mut tx = Transaction { sender: my_address.clone(), recipient, amount, nonce, signature: None };
-                tx.sign(&secret_key);
+                let Some(tx) = tx_opt else {
+                    tracing::error!("Failed to create transaction. Possibly insufficient funds.");
+                    continue;
+                };
                 let mut bc = match blockchain.lock() {
                     Ok(b) => b,
                     Err(e) => {
@@ -348,12 +339,20 @@ async fn main() {
                     #[cfg(feature = "tls")]
                     if let (Some(_), Some(_)) = (tls_cert.as_ref(), tls_key.as_ref()) {
                         let connector = create_tls_connector();
-                        broadcast_tls_message(peers.clone(), &NetworkMessage::Block(last_block), &secret_key, &connector).await;
+                        broadcast_tls_message(
+                            peers.clone(),
+                            &NetworkMessage::Block(last_block),
+                            &secret_key,
+                            &connector,
+                        )
+                        .await;
                     } else {
-                        broadcast_message(peers.clone(), &NetworkMessage::Block(last_block), &secret_key).await;
+                        broadcast_message(peers.clone(), &NetworkMessage::Block(last_block), &secret_key)
+                            .await;
                     }
                     #[cfg(not(feature = "tls"))]
-                    broadcast_message(peers.clone(), &NetworkMessage::Block(last_block), &secret_key).await;
+                    broadcast_message(peers.clone(), &NetworkMessage::Block(last_block), &secret_key)
+                        .await;
                 } else {
                     tracing::error!("Failed to add block. Possibly insufficient funds.");
                 }
@@ -385,7 +384,7 @@ async fn main() {
                         e.into_inner()
                     }
                 };
-                let bal = bc.balances.get(&my_address).copied().unwrap_or(0);
+                let bal = wallet.balance(&bc);
                 tracing::info!("Balance for {}: {}", my_address, bal);
             }
             "quit" | "exit" => {
