@@ -77,9 +77,17 @@ mod tests {
             sender: "a".into(),
             recipient: "b".into(),
             amount: 10,
+            nonce: 0,
             signature: None,
         };
-        let block = Block::new(1, 123, vec![tx.clone()], "prev".into(), Some("me".into()), 1);
+        let block = Block::new(
+            1,
+            123,
+            vec![tx.clone()],
+            "prev".into(),
+            Some("me".into()),
+            1,
+        );
         assert_eq!(block.index, 1);
         assert_eq!(block.timestamp, 123);
         assert_eq!(block.transactions, vec![tx]);
@@ -96,6 +104,7 @@ mod tests {
             sender: "x".into(),
             recipient: "y".into(),
             amount: 5,
+            nonce: 0,
             signature: None,
         };
         let block = Block::new(2, 456, vec![tx], "prevhash".into(), None, 2);
@@ -110,6 +119,7 @@ mod tests {
             sender: "x".into(),
             recipient: "y".into(),
             amount: 1,
+            nonce: 0,
             signature: None,
         };
         let mut block = Block::new(1, 1, vec![tx], "0".into(), None, 3);

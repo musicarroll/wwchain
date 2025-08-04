@@ -21,6 +21,7 @@ pub struct Blockchain {
     pub balances: HashMap<String, u64>,
     pub puzzle_ownership: HashMap<String, u64>,
     pub puzzle_attempts: HashMap<String, u64>,
+    pub nonces: HashMap<String, u64>,
     pub total_supply: u64,
     pub difficulty_prefix: String,
 }
@@ -32,6 +33,7 @@ impl Blockchain {
                 sender: "genesis_address".to_string(),
                 recipient,
                 amount,
+                nonce: 0,
                 signature: None,
             }],
             None => Vec::new(),
@@ -50,6 +52,7 @@ impl Blockchain {
             balances: HashMap::new(),
             puzzle_ownership: HashMap::new(),
             puzzle_attempts: HashMap::new(),
+            nonces: HashMap::new(),
             total_supply: 0,
             difficulty_prefix: DIFFICULTY_PREFIX.to_string(),
         };
@@ -61,6 +64,7 @@ impl Blockchain {
         let mut bals = HashMap::new();
         let mut ownership = HashMap::new();
         let mut attempts = HashMap::new();
+        let mut nonces = HashMap::new();
         let mut supply = 0u64;
 
         for (idx, block) in self.chain.iter().enumerate() {
@@ -88,6 +92,19 @@ impl Blockchain {
                     continue;
                 }
 
+                let expected = nonces.get(&tx.sender).copied().unwrap_or(0);
+                if tx.nonce != expected {
+                    tracing::info!(
+                        "[VALIDATION] Invalid nonce {} for {} in block {} (expected {})",
+                        tx.nonce,
+                        tx.sender,
+                        idx,
+                        expected
+                    );
+                    return false;
+                }
+                nonces.insert(tx.sender.clone(), expected + 1);
+
                 let sbal = bals.get(&tx.sender).copied().unwrap_or(0);
                 if sbal < tx.amount {
                     tracing::info!("[VALIDATION] Overspend in block {}", idx);
@@ -101,6 +118,7 @@ impl Blockchain {
         self.balances = bals;
         self.puzzle_ownership = ownership;
         self.puzzle_attempts = attempts;
+        self.nonces = nonces;
         self.total_supply = supply;
         true
     }
@@ -192,6 +210,7 @@ impl Blockchain {
                         sender: MINT_ADDRESS.to_string(),
                         recipient: addr.clone(),
                         amount: REWARD_AMOUNT,
+                        nonce: 0,
                         signature: None,
                     },
                 );
@@ -200,12 +219,19 @@ impl Blockchain {
         }
 
         let mut temp_balances = self.balances.clone();
+        let mut temp_nonces = self.nonces.clone();
         for tx in &transactions {
             if tx.sender == MINT_ADDRESS {
                 let rbal = temp_balances.get(&tx.recipient).copied().unwrap_or(0);
                 temp_balances.insert(tx.recipient.clone(), rbal + tx.amount);
                 continue;
             }
+            let expected = temp_nonces.get(&tx.sender).copied().unwrap_or(0);
+            if tx.nonce != expected {
+                tracing::info!("[BLOCKCHAIN] Rejected block - bad nonce by {}", tx.sender);
+                return false;
+            }
+            temp_nonces.insert(tx.sender.clone(), expected + 1);
             let sbal = temp_balances.get(&tx.sender).copied().unwrap_or(0);
             if sbal < tx.amount {
                 tracing::info!("[BLOCKCHAIN] Rejected block - overspend by {}", tx.sender);
@@ -234,6 +260,7 @@ impl Blockchain {
         new_block.mine(&self.difficulty_prefix);
         self.chain.push(new_block);
         self.balances = temp_balances;
+        self.nonces = temp_nonces;
 
         if let Some(addr) = sender_addr {
             *self.puzzle_ownership.entry(addr.clone()).or_insert(0) += 1;
@@ -349,6 +376,7 @@ mod tests {
             sender: hex::encode(pk.serialize()),
             recipient: "b".into(),
             amount: 1,
+            nonce: 0,
             signature: None,
         };
         tx.sign(&sk);
@@ -382,6 +410,7 @@ mod tests {
             sender: hex::encode(pk.serialize()),
             recipient: "b".into(),
             amount: 50,
+            nonce: 0,
             signature: None,
         };
         tx.sign(&sk);
@@ -402,6 +431,7 @@ mod tests {
             sender: hex::encode(pk.serialize()),
             recipient: "b".into(),
             amount: 60,
+            nonce: 0,
             signature: None,
         };
         tx1.sign(&sk);
@@ -409,6 +439,7 @@ mod tests {
             sender: hex::encode(pk.serialize()),
             recipient: "c".into(),
             amount: 60,
+            nonce: 1,
             signature: None,
         };
         tx2.sign(&sk);
@@ -429,6 +460,7 @@ mod tests {
             sender: hex::encode(pk.serialize()),
             recipient: "b".into(),
             amount: 2,
+            nonce: 0,
             signature: None,
         };
         tx.sign(&sk);
@@ -452,6 +484,7 @@ mod tests {
             sender: hex::encode(pk.serialize()),
             recipient: "b".into(),
             amount: 1,
+            nonce: 0,
             signature: None,
         };
         tx.sign(&sk);
@@ -476,13 +509,14 @@ mod tests {
             sender: hex::encode(pk.serialize()),
             recipient: "b".into(),
             amount: 1,
+            nonce: 0,
             signature: None,
         };
         tx.sign(&sk);
-        bc.balances.insert(tx.sender.clone(), 1);
+        bc.balances.insert(tx.sender.clone(), 2);
         assert!(bc.add_block(vec![tx.clone()], Some("addr".into())));
         assert_eq!(bc.chain.len(), 2);
-        // Replay the same transaction which should now overspend
+        // Replay the same transaction which should now have bad nonce
         assert!(!bc.add_block(vec![tx], Some("addr".into())));
         assert_eq!(bc.chain.len(), 2); // second block rejected
     }
