@@ -106,7 +106,7 @@ impl Blockchain {
     }
 
     pub(crate) fn chain_work(chain: &[Block]) -> usize {
-        chain
+        let puzzle_work: usize = chain
             .iter()
             .map(|b| {
                 let mut hasher = Sha256::new();
@@ -118,7 +118,54 @@ impl Blockchain {
                     .take_while(|c| *c == '0')
                     .count()
             })
-            .sum()
+            .sum();
+        puzzle_work + Self::stake_weight(chain)
+    }
+
+    fn stake_weight(chain: &[Block]) -> usize {
+        let mut balances: HashMap<String, u64> = HashMap::new();
+        let mut ownership: HashMap<String, u64> = HashMap::new();
+        let mut attempts: HashMap<String, u64> = HashMap::new();
+        let mut weight = 0usize;
+
+        for (idx, block) in chain.iter().enumerate() {
+            let mut hasher = Sha256::new();
+            hasher.update(block.puzzle_id.to_be_bytes());
+            hasher.update(block.puzzle_solution.to_le_bytes());
+            let result = hasher.finalize();
+            let zeros = hex::encode(result)
+                .chars()
+                .take_while(|c| *c == '0')
+                .count();
+
+            if let Some(addr) = &block.sender_addr {
+                let bal = balances.get(addr).copied().unwrap_or(0);
+                let owned = ownership.get(addr).copied().unwrap_or(0);
+                let attempted = attempts.get(addr).copied().unwrap_or(0);
+                let stake = bal + owned + attempted;
+                weight += zeros * stake as usize;
+            }
+
+            for tx in &block.transactions {
+                if tx.sender == "genesis_address" || tx.sender == MINT_ADDRESS {
+                    let rbal = balances.get(&tx.recipient).copied().unwrap_or(0);
+                    balances.insert(tx.recipient.clone(), rbal + tx.amount);
+                } else {
+                    let sbal = balances.get(&tx.sender).copied().unwrap_or(0);
+                    balances.insert(tx.sender.clone(), sbal.saturating_sub(tx.amount));
+                    let rbal = balances.get(&tx.recipient).copied().unwrap_or(0);
+                    balances.insert(tx.recipient.clone(), rbal + tx.amount);
+                }
+            }
+
+            if idx != 0 {
+                if let Some(addr) = &block.sender_addr {
+                    *ownership.entry(addr.clone()).or_insert(0) += 1;
+                    *attempts.entry(addr.clone()).or_insert(0) += 1;
+                }
+            }
+        }
+        weight
     }
 
     pub fn total_work(&self) -> usize {
@@ -469,5 +516,18 @@ mod tests {
         }
         bc.adjust_difficulty();
         assert!(bc.difficulty_prefix.len() > initial.len());
+    }
+
+    #[test]
+    fn test_chain_work_includes_stake() {
+        let mut rich_chain = Blockchain::new(Some(("miner".into(), 100)));
+        assert!(rich_chain.add_block(vec![], Some("miner".into())));
+        let rich_work = Blockchain::chain_work(&rich_chain.chain);
+
+        let mut poor_chain = Blockchain::new(None);
+        assert!(poor_chain.add_block(vec![], Some("miner".into())));
+        let poor_work = Blockchain::chain_work(&poor_chain.chain);
+
+        assert!(rich_work > poor_work);
     }
 }
