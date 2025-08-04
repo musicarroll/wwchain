@@ -13,7 +13,7 @@ pub const MINT_ADDRESS: &str = "mint";
 /// Number of tokens awarded for solving a puzzle.
 pub const REWARD_AMOUNT: u64 = 50;
 /// Maximum number of tokens that can ever exist.
-pub const MAX_SUPPLY: u64 = 21_000_000;
+pub const MAX_SUPPLY: u64 = 1_000_000_000_000;
 
 #[derive(Clone)]
 pub struct Blockchain {
@@ -115,6 +115,11 @@ impl Blockchain {
             }
         }
 
+        if supply > MAX_SUPPLY {
+            tracing::info!("[VALIDATION] Total supply {} exceeds max", supply);
+            return false;
+        }
+
         self.balances = bals;
         self.puzzle_ownership = ownership;
         self.puzzle_attempts = attempts;
@@ -201,9 +206,9 @@ impl Blockchain {
         }
 
         // Mint reward if under cap
-        let mut minted = 0u64;
         if let Some(addr) = &sender_addr {
-            if self.total_supply + REWARD_AMOUNT <= MAX_SUPPLY {
+            let remaining = MAX_SUPPLY.saturating_sub(self.total_supply);
+            if remaining >= REWARD_AMOUNT {
                 transactions.insert(
                     0,
                     Transaction {
@@ -214,8 +219,17 @@ impl Blockchain {
                         signature: None,
                     },
                 );
-                minted = REWARD_AMOUNT;
             }
+        }
+
+        let minted_total: u64 = transactions
+            .iter()
+            .filter(|tx| tx.sender == MINT_ADDRESS)
+            .map(|tx| tx.amount)
+            .sum();
+        if self.total_supply + minted_total > MAX_SUPPLY {
+            tracing::info!("[BLOCKCHAIN] Rejected block - max supply exceeded");
+            return false;
         }
 
         let mut temp_balances = self.balances.clone();
@@ -266,7 +280,7 @@ impl Blockchain {
             *self.puzzle_ownership.entry(addr.clone()).or_insert(0) += 1;
             *self.puzzle_attempts.entry(addr).or_insert(0) += 1;
         }
-        self.total_supply += minted;
+        self.total_supply += minted_total;
         self.adjust_difficulty();
         true
     }
@@ -563,5 +577,28 @@ mod tests {
         let poor_work = Blockchain::chain_work(&poor_chain.chain);
 
         assert!(rich_work > poor_work);
+    }
+
+    #[test]
+    fn test_minting_respects_cap() {
+        let mut bc = Blockchain::new(None);
+        bc.total_supply = MAX_SUPPLY - REWARD_AMOUNT + 1;
+        assert!(bc.add_block(vec![], Some("miner".into())));
+        assert_eq!(bc.total_supply, MAX_SUPPLY - REWARD_AMOUNT + 1);
+        assert!(bc.balances.get("miner").is_none());
+    }
+
+    #[test]
+    fn test_block_rejected_when_minting_exceeds_cap() {
+        let mut bc = Blockchain::new(None);
+        bc.total_supply = MAX_SUPPLY - 10;
+        let tx = Transaction {
+            sender: MINT_ADDRESS.to_string(),
+            recipient: "bob".into(),
+            amount: 20,
+            nonce: 0,
+            signature: None,
+        };
+        assert!(!bc.add_block(vec![tx], Some("miner".into())));
     }
 }
