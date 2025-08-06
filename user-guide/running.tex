@@ -1,0 +1,14 @@
+\chapter{Running a Node}
+Launch a node with optional arguments:
+\begin{verbatim}
+cargo run -- --port <PORT> --node-name <NAME> --peers <PEER1,PEER2,...> --chain-dir <DIR> --network <mainnet|testnet>
+\end{verbatim}
+When the \texttt{tls} feature is enabled you can provide certificate paths:
+\begin{verbatim}
+cargo run --features tls -- --tls-cert cert.pem --tls-key key.pem
+\end{verbatim}
+Example starting a testnet node:
+\begin{verbatim}
+cargo run -- --network testnet --port 6001 --node-name node1
+\end{verbatim}
+To run multiple nodes locally, start each in its own terminal and list the other as a peer. The interactive prompt accepts commands like \texttt{add}, \texttt{remove}, \texttt{list} and \texttt{balance}.
