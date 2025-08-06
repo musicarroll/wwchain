@@ -35,6 +35,10 @@ use crate::transaction::Transaction;
 
 /// Current protocol version understood by this node
 pub const PROTOCOL_VERSION: u8 = 1;
+
+/// Network identifiers to segregate main and test nets
+pub const NETWORK_MAINNET: u8 = 1;
+pub const NETWORK_TESTNET: u8 = 2;
 use secp256k1::{ecdsa::Signature, Message, PublicKey, Secp256k1, SecretKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -138,10 +142,10 @@ pub enum NetworkMessage {
     Transaction(Transaction),
     Block(Block),
     Text(String),
-    ChainRequest(String),      // requesting node's address
-    ChainResponse(Vec<Block>), // the entire chain
-    Handshake(String),         // peer introduction
-    PeerList(Vec<String>),     // returned during handshake
+    ChainRequest(String),                    // requesting node's address
+    ChainResponse(Vec<Block>),               // the entire chain
+    Handshake { addr: String, network: u8 }, // peer introduction with network id
+    PeerList(Vec<String>),                   // returned during handshake
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -279,6 +283,7 @@ pub fn handle_client_with_chain(
     mempool: Arc<Mutex<Mempool>>,
     my_addr: String,
     sk: Arc<SecretKey>,
+    network: u8,
 ) {
     match read_length_prefixed(&mut stream) {
         Ok(buffer) => {
@@ -296,7 +301,18 @@ pub fn handle_client_with_chain(
                 }
                 let msg = signed.message.payload;
                 match msg {
-                    NetworkMessage::Handshake(addr) => {
+                    NetworkMessage::Handshake {
+                        addr,
+                        network: peer_net,
+                    } => {
+                        if peer_net != network {
+                            tracing::info!(
+                                "[SERIALIZED] Ignoring handshake from {} on network {}",
+                                addr,
+                                peer_net
+                            );
+                            return;
+                        }
                         tracing::info!("[SERIALIZED] Received Handshake from {}", addr);
                         peers.add_peer(&addr);
                         let known = peers.all();
@@ -423,6 +439,7 @@ pub async fn handle_client_with_chain<S>(
     mempool: Arc<Mutex<Mempool>>,
     my_addr: String,
     sk: Arc<SecretKey>,
+    network: u8,
 ) where
     S: AsyncReadExt + AsyncWriteExt + Unpin,
 {
@@ -442,7 +459,18 @@ pub async fn handle_client_with_chain<S>(
                 }
                 let msg = signed.message.payload;
                 match msg {
-                    NetworkMessage::Handshake(addr) => {
+                    NetworkMessage::Handshake {
+                        addr,
+                        network: peer_net,
+                    } => {
+                        if peer_net != network {
+                            tracing::info!(
+                                "[SERIALIZED] Ignoring handshake from {} on network {}",
+                                addr,
+                                peer_net
+                            );
+                            return;
+                        }
                         tracing::info!("[SERIALIZED] Received Handshake from {}", addr);
                         peers.add_peer(&addr);
                         let known = peers.all();
@@ -567,6 +595,7 @@ pub fn start_server_with_chain(
     mempool: Arc<Mutex<Mempool>>,
     my_addr: String,
     sk: Arc<SecretKey>,
+    network: u8,
 ) -> io::Result<()> {
     let listener = TcpListener::bind(addr)?;
     tracing::info!("[SERIALIZED] Server listening on {}", addr);
@@ -578,7 +607,8 @@ pub fn start_server_with_chain(
                 let me = my_addr.clone();
                 let mp = mempool.clone();
                 let sk_clone = sk.clone();
-                thread::spawn(|| handle_client_with_chain(stream, bc, p, mp, me, sk_clone));
+                let n = network;
+                thread::spawn(|| handle_client_with_chain(stream, bc, p, mp, me, sk_clone, n));
             }
             Err(e) => tracing::error!("Connection failed: {}", e),
         }
@@ -594,6 +624,7 @@ pub async fn start_server_with_chain(
     mempool: Arc<Mutex<Mempool>>,
     my_addr: String,
     sk: Arc<SecretKey>,
+    network: u8,
 ) -> io::Result<()> {
     let listener = TcpListener::bind(addr).await?;
     tracing::info!("[SERIALIZED] Server listening on {}", addr);
@@ -604,8 +635,9 @@ pub async fn start_server_with_chain(
         let me = my_addr.clone();
         let mp = mempool.clone();
         let sk_clone = sk.clone();
+        let n = network;
         task::spawn(async move {
-            handle_client_with_chain(stream, bc, p, mp, me, sk_clone).await;
+            handle_client_with_chain(stream, bc, p, mp, me, sk_clone, n).await;
         });
     }
     #[allow(unreachable_code)]
@@ -622,6 +654,7 @@ pub async fn start_tls_server_with_chain(
     sk: Arc<SecretKey>,
     cert_path: &str,
     key_path: &str,
+    network: u8,
 ) -> io::Result<()> {
     let acceptor = load_tls_acceptor(cert_path, key_path)?;
     let acceptor = StdArc::new(acceptor);
@@ -635,10 +668,11 @@ pub async fn start_tls_server_with_chain(
         let mp = mempool.clone();
         let sk_clone = sk.clone();
         let acceptor = acceptor.clone();
+        let n = network;
         task::spawn(async move {
             match acceptor.accept(stream).await {
                 Ok(tls_stream) => {
-                    handle_client_with_chain(tls_stream, bc, p, mp, me, sk_clone).await;
+                    handle_client_with_chain(tls_stream, bc, p, mp, me, sk_clone, n).await;
                 }
                 Err(e) => tracing::error!("TLS accept error: {}", e),
             }
@@ -739,9 +773,21 @@ pub async fn broadcast_tls_message(
 
 /// Perform a handshake with `addr` exchanging peer lists.
 #[cfg(feature = "sync")]
-pub fn perform_handshake(addr: &str, my_addr: &str, peers: Arc<PeerList>, sk: &SecretKey) {
+pub fn perform_handshake(
+    addr: &str,
+    my_addr: &str,
+    peers: Arc<PeerList>,
+    sk: &SecretKey,
+    network: u8,
+) {
     if let Ok(mut stream) = TcpStream::connect(addr) {
-        let signed = SignedMessage::new(NetworkMessage::Handshake(my_addr.to_string()), sk);
+        let signed = SignedMessage::new(
+            NetworkMessage::Handshake {
+                addr: my_addr.to_string(),
+                network,
+            },
+            sk,
+        );
         let req_buf = serde_json::to_vec(&signed).expect("serialize");
         let req_buf = prefix_with_length(req_buf);
         if stream.write_all(&req_buf).is_err() {
@@ -760,9 +806,21 @@ pub fn perform_handshake(addr: &str, my_addr: &str, peers: Arc<PeerList>, sk: &S
 }
 
 #[cfg(not(feature = "sync"))]
-pub async fn perform_handshake(addr: &str, my_addr: &str, peers: Arc<PeerList>, sk: &SecretKey) {
+pub async fn perform_handshake(
+    addr: &str,
+    my_addr: &str,
+    peers: Arc<PeerList>,
+    sk: &SecretKey,
+    network: u8,
+) {
     if let Ok(mut stream) = TcpStream::connect(addr).await {
-        let signed = SignedMessage::new(NetworkMessage::Handshake(my_addr.to_string()), sk);
+        let signed = SignedMessage::new(
+            NetworkMessage::Handshake {
+                addr: my_addr.to_string(),
+                network,
+            },
+            sk,
+        );
         let req_buf = serde_json::to_vec(&signed).expect("serialize");
         let req_buf = prefix_with_length(req_buf);
         if stream.write_all(&req_buf).await.is_err() {
@@ -787,6 +845,7 @@ pub async fn perform_tls_handshake(
     peers: Arc<PeerList>,
     sk: &SecretKey,
     connector: &TlsConnector,
+    network: u8,
 ) {
     if let Ok(stream) = TcpStream::connect(addr).await {
         let host = addr.split(':').next().unwrap_or("localhost");
@@ -795,7 +854,13 @@ pub async fn perform_tls_handshake(
             Err(_) => return,
         };
         if let Ok(mut stream) = connector.connect(server_name, stream).await {
-            let signed = SignedMessage::new(NetworkMessage::Handshake(my_addr.to_string()), sk);
+            let signed = SignedMessage::new(
+                NetworkMessage::Handshake {
+                    addr: my_addr.to_string(),
+                    network,
+                },
+                sk,
+            );
             let req_buf = serde_json::to_vec(&signed).expect("serialize");
             let req_buf = prefix_with_length(req_buf);
             if stream.write_all(&req_buf).await.is_err() {
@@ -1175,6 +1240,7 @@ mod tests {
                 server1_mp_clone,
                 addr1_my,
                 server1_sk,
+                NETWORK_MAINNET,
             )
             .await
             .unwrap();
@@ -1197,6 +1263,7 @@ mod tests {
                 server2_mp_clone,
                 addr2_my,
                 server2_sk,
+                NETWORK_MAINNET,
             )
             .await
             .unwrap();
@@ -1304,6 +1371,7 @@ mod tests {
                     mp_clone,
                     addr_str,
                     sk_clone,
+                    NETWORK_MAINNET,
                 )
                 .await;
             }
@@ -1342,6 +1410,7 @@ mod tests {
                     mp_clone,
                     addr_str,
                     sk_clone,
+                    NETWORK_MAINNET,
                 )
                 .await;
             }
@@ -1401,6 +1470,7 @@ mod tests {
                     mp_clone,
                     addr_str,
                     sk_clone,
+                    NETWORK_MAINNET,
                 )
                 .await;
             }
@@ -1466,7 +1536,14 @@ mod tests {
         });
 
         let peerlist = Arc::new(PeerList::new());
-        perform_handshake(&addr.to_string(), "me", peerlist.clone(), &sk_client).await;
+        perform_handshake(
+            &addr.to_string(),
+            "me",
+            peerlist.clone(),
+            &sk_client,
+            NETWORK_MAINNET,
+        )
+        .await;
         assert!(peerlist.all().len() >= 200);
     }
 
