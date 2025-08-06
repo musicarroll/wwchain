@@ -8,10 +8,11 @@ mod transaction;
 mod wallet;
 
 use blockchain::Blockchain;
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use mempool::Mempool;
 use network_serialize::{
-    broadcast_message, perform_handshake, start_server_with_chain, NetworkMessage,
+    broadcast_message, perform_handshake, start_server_with_chain, NetworkMessage, NETWORK_MAINNET,
+    NETWORK_TESTNET,
 };
 #[cfg(feature = "tls")]
 use network_serialize::{
@@ -43,6 +44,10 @@ struct Cli {
     #[arg(long, default_value = "chain_db")]
     chain_dir: String,
 
+    /// Network to connect to (mainnet or testnet)
+    #[arg(long, value_enum, default_value_t = Network::Mainnet)]
+    network: Network,
+
     /// TLS certificate for secure connections
     #[cfg(feature = "tls")]
     #[arg(long)]
@@ -56,6 +61,21 @@ struct Cli {
 use std::sync::{Arc, Mutex};
 use tracing_subscriber::EnvFilter;
 
+#[derive(Copy, Clone, Debug, ValueEnum)]
+enum Network {
+    Mainnet,
+    Testnet,
+}
+
+impl Network {
+    fn id(&self) -> u8 {
+        match self {
+            Network::Mainnet => NETWORK_MAINNET,
+            Network::Testnet => NETWORK_TESTNET,
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
@@ -66,11 +86,16 @@ async fn main() {
     let port = cli.port;
     let node_name = cli.node_name;
     let peers_csv = cli.peers;
-    let chain_dir = cli.chain_dir;
+    let mut chain_dir = cli.chain_dir;
+    let network = cli.network;
+    if matches!(network, Network::Testnet) && chain_dir == "chain_db" {
+        chain_dir = "test_chain_db".to_string();
+    }
     #[cfg(feature = "tls")]
     let tls_cert = cli.tls_cert.clone();
     #[cfg(feature = "tls")]
     let tls_key = cli.tls_key.clone();
+    let network_id = network.id();
     let server_addr = format!("127.0.0.1:{}", port);
 
     // --- Load or create wallet ---
@@ -103,7 +128,11 @@ async fn main() {
         }
         Err(_) => {
             tracing::info!("[STORAGE] Starting new chain");
-            Blockchain::new(Some((my_address.clone(), 100)))
+            let mut chain = Blockchain::new(Some((my_address.clone(), 100)));
+            if matches!(network, Network::Testnet) {
+                chain.difficulty_prefix = "00".into();
+            }
+            chain
         }
     };
     let starting_balance = wallet.balance(&initial_chain);
@@ -131,15 +160,26 @@ async fn main() {
         tokio::spawn(async move {
             #[cfg(feature = "tls")]
             if let (Some(cert), Some(key)) = (cert_opt, key_opt) {
-                if let Err(e) =
-                    start_tls_server_with_chain(&addr, bc, p, mp, me, Arc::new(sk), &cert, &key)
-                        .await
+                if let Err(e) = start_tls_server_with_chain(
+                    &addr,
+                    bc,
+                    p,
+                    mp,
+                    me,
+                    Arc::new(sk),
+                    &cert,
+                    &key,
+                    network_id,
+                )
+                .await
                 {
                     tracing::error!("Server error: {}", e);
                 }
                 return;
             }
-            if let Err(e) = start_server_with_chain(&addr, bc, p, mp, me, Arc::new(sk)).await {
+            if let Err(e) =
+                start_server_with_chain(&addr, bc, p, mp, me, Arc::new(sk), network_id).await
+            {
                 tracing::error!("Server error: {}", e);
             }
         });
@@ -158,12 +198,20 @@ async fn main() {
                     peers.clone(),
                     &secret_key,
                     &connector,
+                    network_id,
                 )
                 .await;
                 continue;
             }
         }
-        perform_handshake(&peer_addr, &server_addr, peers.clone(), &secret_key).await;
+        perform_handshake(
+            &peer_addr,
+            &server_addr,
+            peers.clone(),
+            &secret_key,
+            network_id,
+        )
+        .await;
     }
     let _ = peers.save_to_file(&peers_file);
 

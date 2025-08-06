@@ -17,7 +17,7 @@ This compiles the project and fetches all needed dependencies.
 Launch a node with optional arguments:
 
 ```bash
-cargo run -- --port <PORT> --node-name <NAME> --peers <PEER1,PEER2,...> --chain-dir <DIR>
+cargo run -- --port <PORT> --node-name <NAME> --peers <PEER1,PEER2,...> --chain-dir <DIR> --network <mainnet|testnet>
 ```
 
 When the `tls` feature is enabled you can also provide certificate paths:
@@ -36,11 +36,12 @@ openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem -out cert.pem -days 36
 - `--node-name` - friendly name used in prompts (default: "node1").
 - `--peers` - comma separated list of peer addresses to connect to at startup.
 - `--chain-dir` - directory where the blockchain database is stored (default: `chain_db`).
+- `--network` - choose `mainnet` or `testnet` (default: `mainnet`). Selecting `testnet` uses a separate `test_chain_db` directory and a lower mining difficulty.
 
 Example starting a single node:
 
 ```bash
-cargo run -- --port 6001 --node-name node1
+cargo run -- --network testnet --port 6001 --node-name node1
 ```
 
 ## Starting multiple nodes locally
