@@ -1,4 +1,4 @@
 \chapter{Wallet and Transactions}
 The wallet manages a secp256k1 key pair and derives your address. It can build and sign transactions using the current blockchain state, so submitting a \texttt{tx} command automatically produces a properly signed transaction. Use \texttt{balance} at any time to view your wallet's current balance.
 
-Set the \texttt{WALLET_PASSWORD} environment variable before starting a node to encrypt the wallet's private key. The file will then be written with an \texttt{enc:} prefix and must be decrypted using the same password on subsequent runs.
+Set the \texttt{WALLET\_PASSWORD} environment variable before starting a node to encrypt the wallet's private key. The file will then be written with an \texttt{enc:} prefix and must be decrypted using the same password on subsequent runs.
