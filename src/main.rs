@@ -330,7 +330,15 @@ async fn main() {
 
     use std::io::{self, Write};
 
-    tracing::info!("Type: tx <recipient> <amount>  |  add <peer_addr>  |  remove <peer_addr>  |  list  |  balance  |  quit");
+    if matches!(network, Network::Testnet) {
+        tracing::info!(
+            "Type: tx <recipient> <amount>  |  add <peer_addr>  |  remove <peer_addr>  |  list  |  balance  |  puzzle-stats [<address>]  |  quit"
+        );
+    } else {
+        tracing::info!(
+            "Type: tx <recipient> <amount>  |  add <peer_addr>  |  remove <peer_addr>  |  list  |  balance  |  quit"
+        );
+    }
     tracing::info!("Example: tx alice 5");
     tracing::info!("Example: add 127.0.0.1:6004");
 
@@ -434,6 +442,41 @@ async fn main() {
                 };
                 let bal = wallet.balance(&bc);
                 tracing::info!("Balance for {}: {}", my_address, bal);
+            }
+            "puzzle-stats" if matches!(network, Network::Testnet) => {
+                let bc = match blockchain.lock() {
+                    Ok(b) => b,
+                    Err(e) => {
+                        tracing::error!("Blockchain lock poisoned: {}", e);
+                        e.into_inner()
+                    }
+                };
+                if parts.len() == 2 {
+                    let addr = parts[1];
+                    let owned = bc.puzzle_ownership.get(addr).copied().unwrap_or(0);
+                    let attempts = bc.puzzle_attempts.get(addr).copied().unwrap_or(0);
+                    tracing::info!(
+                        "Puzzle stats for {}: ownership {} attempts {}",
+                        addr,
+                        owned,
+                        attempts
+                    );
+                } else {
+                    use std::collections::BTreeSet;
+                    let mut addrs = BTreeSet::new();
+                    addrs.extend(bc.puzzle_ownership.keys().cloned());
+                    addrs.extend(bc.puzzle_attempts.keys().cloned());
+                    for addr in addrs {
+                        let owned = bc.puzzle_ownership.get(&addr).copied().unwrap_or(0);
+                        let attempts = bc.puzzle_attempts.get(&addr).copied().unwrap_or(0);
+                        tracing::info!(
+                            "{}: ownership {} attempts {}",
+                            addr,
+                            owned,
+                            attempts
+                        );
+                    }
+                }
             }
             "quit" | "exit" => {
                 tracing::info!("Node shutting down.");
