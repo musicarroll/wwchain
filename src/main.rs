@@ -20,6 +20,7 @@ use network_serialize::{
     request_chain_and_reconcile_tls, start_tls_server_with_chain,
 };
 use peer::PeerList;
+use regex::Regex;
 use storage::{load_chain, save_chain};
 use tokio::time::{sleep, Duration};
 use transaction::Transaction;
@@ -332,11 +333,11 @@ async fn main() {
 
     if matches!(network, Network::Testnet) {
         tracing::info!(
-            "Type: tx <recipient> <amount>  |  add <peer_addr>  |  remove <peer_addr>  |  list  |  balance  |  puzzle-stats [<address>]  |  quit"
+            "Type: tx <recipient> <amount>  |  add <peer_addr>  |  remove <peer_addr>  |  list  |  balance  |  puzzle-stats [<address>]  |  search <regex>  |  quit"
         );
     } else {
         tracing::info!(
-            "Type: tx <recipient> <amount>  |  add <peer_addr>  |  remove <peer_addr>  |  list  |  balance  |  quit"
+            "Type: tx <recipient> <amount>  |  add <peer_addr>  |  remove <peer_addr>  |  list  |  balance  |  search <regex>  |  quit"
         );
     }
     tracing::info!("Example: tx alice 5");
@@ -478,12 +479,37 @@ async fn main() {
                     }
                 }
             }
+            "search" if parts.len() >= 2 => {
+                let pattern = parts[1..].join(" ");
+                let re = match Regex::new(&pattern) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        tracing::error!("Invalid regex: {}", e);
+                        continue;
+                    }
+                };
+                let bc = match blockchain.lock() {
+                    Ok(b) => b,
+                    Err(e) => {
+                        tracing::error!("Blockchain lock poisoned: {}", e);
+                        e.into_inner()
+                    }
+                };
+                let matches = bc.search(&re);
+                if matches.is_empty() {
+                    tracing::info!("No matches found for {}", pattern);
+                } else {
+                    for m in matches {
+                        tracing::info!("{}", m);
+                    }
+                }
+            }
             "quit" | "exit" => {
                 tracing::info!("Node shutting down.");
                 let _ = peers.save_to_file(&peers_file);
                 break;
             }
-            _ => tracing::info!("Unrecognized. Use: tx <recipient> <amount> | add <peer_addr> | remove <peer_addr> | list | balance | quit"),
+            _ => tracing::info!("Unrecognized. Use: tx <recipient> <amount> | add <peer_addr> | remove <peer_addr> | list | balance | search <regex> | quit"),
         }
     }
 }
