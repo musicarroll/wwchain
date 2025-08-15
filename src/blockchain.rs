@@ -1,5 +1,7 @@
 use crate::block::Block;
 use crate::transaction::Transaction;
+use regex::Regex;
+use serde_json;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -354,6 +356,21 @@ impl Blockchain {
         tmp.recompute_balances()
     }
 
+    pub fn search(&self, pattern: &Regex) -> Vec<String> {
+        self.chain
+            .iter()
+            .filter_map(|block| {
+                serde_json::to_string(block).ok().and_then(|s| {
+                    if pattern.is_match(&s) {
+                        Some(s)
+                    } else {
+                        None
+                    }
+                })
+            })
+            .collect()
+    }
+
     pub fn voting_power(&self, addr: &str) -> u64 {
         let bal = self.balances.get(addr).copied().unwrap_or(0);
         let owned = self.puzzle_ownership.get(addr).copied().unwrap_or(0);
@@ -368,6 +385,7 @@ mod tests {
     use hex;
     use rand::rngs::OsRng;
     use rand::RngCore;
+    use regex::Regex;
     use secp256k1::{PublicKey, Secp256k1, SecretKey};
 
     #[test]
@@ -542,6 +560,17 @@ mod tests {
         bc.puzzle_ownership.insert("alice".into(), 2);
         bc.puzzle_attempts.insert("alice".into(), 3);
         assert_eq!(bc.voting_power("alice"), 15);
+    }
+
+    #[test]
+    fn test_search_finds_matching_blocks() {
+        let mut bc = Blockchain::new(None);
+        assert!(bc.add_block(vec![], Some("miner1".into())));
+        assert!(bc.add_block(vec![], Some("miner2".into())));
+        let re = Regex::new("miner1").unwrap();
+        let results = bc.search(&re);
+        assert_eq!(results.len(), 1);
+        assert!(results[0].contains("miner1"));
     }
 
     #[test]
