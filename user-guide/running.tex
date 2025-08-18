@@ -18,6 +18,7 @@ To run multiple nodes locally, start each in its own terminal and list the other
 \item \texttt{remove <peer\_addr>} to drop a peer.
 \item \texttt{list} to show current peers.
 \item \texttt{balance} to display your wallet balance.
+\item \texttt{search <regex>} to query recent blocks or transactions for matching text.
 \item \texttt{puzzle-stats [<address>]} (testnet only) to show puzzle ownership and attempt counts.
 \end{itemize}
 Example puzzle queries:
@@ -25,3 +26,11 @@ Example puzzle queries:
 puzzle-stats
 puzzle-stats alice
 \end{verbatim}
+
+Example search queries:
+\begin{verbatim}
+search alice
+search "bob|carol"
+\end{verbatim}
+
+Each transaction immediately mines a new block; the node does not create blocks on a periodic schedule.

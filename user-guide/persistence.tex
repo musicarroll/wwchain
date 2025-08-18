@@ -1,6 +1,8 @@
 \chapter{Chain Persistence and Logging}
 Blocks are stored in a RocksDB database. The database lives in a directory (default \texttt{chain\_db}) which can be changed with the \texttt{--chain-dir} argument. Each block is written atomically so crashes cannot corrupt previously committed data.
 
+Blocks are mined on demand whenever transactions are submitted rather than at fixed time intervals. The persistent database therefore contains every block in order, along with all transactions they include. On startup the node reloads this history and recomputes wallet balances from it, so the stored chain captures the complete record of transfers and balances.
+
 Output is produced using the \texttt{tracing} framework. Control log verbosity by setting the \texttt{RUST\_LOG} environment variable, for example \texttt{RUST\_LOG=info}.
 
 This project is intended for learning and experimentation only and has not been audited for production use.
