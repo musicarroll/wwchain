@@ -2,3 +2,15 @@
 /chain_db
 chain.json
 Cargo.lock
+test_chain_db/
+user-guide/introduction.aux
+user-guide/main.aux
+user-guide/main.log
+user-guide/main.out
+user-guide/main.pdf
+user-guide/main.synctex.gz
+user-guide/main.toc
+user-guide/persistence.aux
+user-guide/running.aux
+user-guide/setup.aux
+user-guide/wallet.aux
