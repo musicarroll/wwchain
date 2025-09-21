@@ -1,30 +1,21 @@
-mod block;
-mod blockchain;
-mod mempool;
-mod network_serialize;
-mod peer;
-mod storage;
-mod transaction;
-mod wallet;
-
-use blockchain::Blockchain;
+use wwchain::blockchain::Blockchain;
 use clap::{Parser, ValueEnum};
-use mempool::Mempool;
-use network_serialize::{
+use wwchain::mempool::Mempool;
+use wwchain::network_serialize::{
     broadcast_message, perform_handshake, start_server_with_chain, NetworkMessage, NETWORK_MAINNET,
     NETWORK_TESTNET,
 };
 #[cfg(feature = "tls")]
-use network_serialize::{
+use wwchain::network_serialize::{
     broadcast_tls_message, create_tls_connector, perform_tls_handshake,
     request_chain_and_reconcile_tls, start_tls_server_with_chain,
 };
-use peer::PeerList;
+use wwchain::peer::PeerList;
 use regex::Regex;
-use storage::{load_chain, save_chain};
+use wwchain::storage::{load_chain, save_chain};
 use tokio::time::{sleep, Duration};
-use transaction::Transaction;
-use wallet::Wallet;
+use wwchain::transaction::Transaction;
+use wwchain::wallet::Wallet;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]

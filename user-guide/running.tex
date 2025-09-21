@@ -34,3 +34,54 @@ search "bob|carol"
 \end{verbatim}
 
 Each transaction immediately mines a new block; the node does not create blocks on a periodic schedule.
+
+\section{REST Shim and App Integration}
+The project includes an optional HTTP REST shim that translates simple HTTP requests into signed network messages, so external apps (e.g., the Wordwalk Django site) can interact with the node without reimplementing the binary TCP protocol or signature logic.
+
+\subsection{Starting the shim}
+\begin{verbatim}
+WWCHAIN_PEER_ADDR=127.0.0.1:6001 \\
+WWCHAIN_REST_ADDR=127.0.0.1:7000 \\
+# optional token auth
+# WWCHAIN_REST_TOKEN=changeme \\
+# optional fixed signing key (32 bytes hex). If unset, an ephemeral key is generated.
+# WWCHAIN_SECRET_HEX=<64 hex chars> \\
+cargo run --bin rest_shim
+\end{verbatim}
+
+\subsection{Endpoints}
+\begin{itemize}
+\item \texttt{GET /health} \to ``ok''
+\item \texttt{POST /text} with \texttt{\{ "text": "hi", "peer": "127.0.0.1:6001"? \}} \to signed \texttt{Text}
+\item \texttt{POST /event} with \texttt{\{ "kind": "puzzle\_complete", "data": \{...\}, "peer"? \}} \to signed \texttt{AppEvent}
+\item \texttt{POST /tx} with \texttt{\{ "recipient": "<hex pub>", "amount": 1, "nonce": 42, "peer"? \}} \to signed \texttt{Transaction}
+\item \texttt{GET /chain} returns the full chain as JSON (list of blocks).
+\end{itemize}
+
+When \texttt{WWCHAIN\_REST\_TOKEN} is set the shim requires either an \texttt{X-Auth-Token} header or \texttt{Authorization: Bearer <token>} on POST requests.
+
+\subsection{AppEvent structure}
+For structured application messages the shim sends a signed \texttt{AppEvent}:
+\begin{verbatim}
+{ "version": 1, "payload": { "AppEvent": { "kind": "puzzle_complete",
+  "data": { "attempt_id": 1, "puzzle_id": 2, "user_id": 3,
+            "score": 50, "elapsed_ms": 12345, "ts": "2025-01-01T00:00:00Z",
+            "commitment": "<sha256 of canonical data>" } } } }
+\end{verbatim}
+
+\subsection{Wordwalk (Django) integration}
+The Wordwalk site uses the shim in development and testnet. Key points:
+\begin{itemize}
+\item Set \texttt{WWCHAIN\_REST\_URL} (e.g., \texttt{http://127.0.0.1:7000}) and optional \texttt{WWCHAIN\_REST\_TOKEN} in the Django environment.
+\item A feature flag \texttt{CHAIN\_EVENTS\_ENABLED} guards all sends and defaults to off for safety.
+\item A superuser-only test page at \texttt{/admin-tools/wwchain/} provides quick POST tests and shows recent send logs and the current nonce.
+\item Puzzle completion emits an \texttt{AppEvent} (best-effort, with a hashed commitment of key fields); marketplace transactions send a signed \texttt{Transaction} plus a \texttt{trade} \texttt{AppEvent} when enabled.
+\item Failed sends are queued in an outbox for retry; admin commands:
+\begin{verbatim}
+python manage.py flush_chain_outbox --max 50
+python manage.py index_chain_events
+python manage.py summarize_chain_events --period day --days 14 --source both
+\end{verbatim}
+\end{itemize}
+
+For production deployments keep the shim bound to localhost, enable token auth, and leave \texttt{CHAIN\_EVENTS\_ENABLED} off until integration is planned.

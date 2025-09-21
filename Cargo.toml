@@ -28,6 +28,8 @@ regex = "1"
 rand = "0.8"
 secp256k1 = "0.28"
 # tiny-http = "0.12"      # For REST API
+axum = { version = "0.7", default-features = false, features = ["json", "tokio", "http1"] }
+http = "1"
 
 # Dev: Uncomment for hot reloading (not needed in production)
 # cargo-watch = "8.4"

@@ -41,6 +41,7 @@ pub const NETWORK_MAINNET: u8 = 1;
 pub const NETWORK_TESTNET: u8 = 2;
 use secp256k1::{ecdsa::Signature, Message, PublicKey, Secp256k1, SecretKey};
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 use sha2::{Digest, Sha256};
 use std::io;
 use std::sync::{Arc, Mutex};
@@ -142,6 +143,7 @@ pub enum NetworkMessage {
     Transaction(Transaction),
     Block(Block),
     Text(String),
+    AppEvent { kind: String, data: JsonValue },
     ChainRequest(String),                    // requesting node's address
     ChainResponse(Vec<Block>),               // the entire chain
     Handshake { addr: String, network: u8 }, // peer introduction with network id
@@ -182,6 +184,32 @@ impl NetworkMessage {
                 Vec::new()
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod app_event_tests {
+    use super::*;
+    use serde_json::json;
+    use secp256k1::SecretKey;
+
+    #[test]
+    fn app_event_round_trip_and_sign_verify() {
+        let msg = NetworkMessage::AppEvent { kind: "puzzle_complete".into(), data: json!({"attempt_id": 1 }) };
+        let ser = serde_json::to_vec(&msg).expect("serialize");
+        let de: NetworkMessage = serde_json::from_slice(&ser).expect("deserialize");
+        match de {
+            NetworkMessage::AppEvent { kind, data } => {
+                assert_eq!(kind, "puzzle_complete");
+                assert_eq!(data["attempt_id"], 1);
+            }
+            _ => panic!("expected AppEvent"),
+        }
+
+        // Signed message verify
+        let sk = SecretKey::from_slice(&[3u8; 32]).unwrap();
+        let signed = SignedMessage::new(NetworkMessage::AppEvent { kind: "puzzle_complete".into(), data: json!({"attempt_id": 1 }) }, &sk);
+        assert!(signed.verify());
     }
 }
 
@@ -411,6 +439,15 @@ pub fn handle_client_with_chain(
                         peers.merge(&list);
                     }
                     NetworkMessage::Text(s) => tracing::info!("[SERIALIZED] Received Text: {}", s),
+                    NetworkMessage::AppEvent { kind, data } => {
+                        let preview = match serde_json::to_string(&data) {
+                            Ok(s) => {
+                                if s.len() > 200 { format!("{}...", &s[..200]) } else { s }
+                            }
+                            Err(_) => String::from("<invalid json>"),
+                        };
+                        tracing::info!("[SERIALIZED] Received AppEvent kind={} data={}", kind, preview);
+                    }
                 }
                 let response = b"OK (parsed NetworkMessage)\n";
                 if let Err(e) = stream.write_all(response) {
@@ -571,6 +608,15 @@ pub async fn handle_client_with_chain<S>(
                         peers.merge(&list);
                     }
                     NetworkMessage::Text(s) => tracing::info!("[SERIALIZED] Received Text: {}", s),
+                    NetworkMessage::AppEvent { kind, data } => {
+                        let preview = match serde_json::to_string(&data) {
+                            Ok(s) => {
+                                if s.len() > 200 { format!("{}...", &s[..200]) } else { s }
+                            }
+                            Err(_) => String::from("<invalid json>"),
+                        };
+                        tracing::info!("[SERIALIZED] Received AppEvent kind={} data={}", kind, preview);
+                    }
                 }
                 let response = b"OK (parsed NetworkMessage)\n";
                 let _ = stream.write_all(response).await;
