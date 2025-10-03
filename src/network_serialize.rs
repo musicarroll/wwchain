@@ -273,12 +273,14 @@ pub fn handle_chain_response(local_chain: &mut Blockchain, their_chain: Vec<Bloc
     if Blockchain::chain_work(&their_chain) > local_chain.total_work() {
         // Validate new chain
         let mut valid = true;
+        // Use local chain's current difficulty target when validating peer chain
+        let diff = local_chain.difficulty_prefix.as_str();
         for i in 1..their_chain.len() {
             let prev = &their_chain[i - 1];
             let curr = &their_chain[i];
             if curr.prev_hash != prev.hash
                 || curr.hash != curr.calculate_hash()
-                || !curr.is_puzzle_valid(DIFFICULTY_PREFIX)
+                || !curr.is_puzzle_valid(diff)
             {
                 valid = false;
                 break;
@@ -286,7 +288,7 @@ pub fn handle_chain_response(local_chain: &mut Blockchain, their_chain: Vec<Bloc
         }
         if valid {
             if their_chain[0].hash != their_chain[0].calculate_hash()
-                || !their_chain[0].is_puzzle_valid(DIFFICULTY_PREFIX)
+                || !their_chain[0].is_puzzle_valid(diff)
             {
                 valid = false;
             }
@@ -410,15 +412,24 @@ pub fn handle_client_with_chain(
                             "[SERIALIZED] Received ChainRequest from {}",
                             requestor_addr
                         );
-                        let chain = match blockchain.lock() {
-                            Ok(c) => c,
-                            Err(e) => {
-                                tracing::error!("Blockchain lock poisoned: {}", e);
-                                e.into_inner()
-                            }
+                        let chain_blocks = {
+                            let chain = match blockchain.lock() {
+                                Ok(c) => c,
+                                Err(e) => {
+                                    tracing::error!("Blockchain lock poisoned: {}", e);
+                                    e.into_inner()
+                                }
+                            };
+                            chain.chain.clone()
                         };
-                        let response = NetworkMessage::ChainResponse(chain.chain.clone());
-                        let _ = send_message(&requestor_addr, &response, &sk);
+                        // Reply on the same stream with a length-prefixed SignedMessage
+                        let resp = SignedMessage::new(NetworkMessage::ChainResponse(chain_blocks), &sk);
+                        let resp_buf = serde_json::to_vec(&resp).expect("serialize");
+                        let resp_buf = prefix_with_length(resp_buf);
+                        if let Err(e) = stream.write_all(&resp_buf) {
+                            tracing::error!("Failed to write ChainResponse: {}", e);
+                        }
+                        return;
                     }
                     NetworkMessage::ChainResponse(their_chain) => {
                         tracing::info!(
@@ -586,8 +597,14 @@ pub async fn handle_client_with_chain<S>(
                             };
                             chain.chain.clone()
                         };
-                        let response = NetworkMessage::ChainResponse(chain_blocks);
-                        let _ = send_message(&requestor_addr, &response, &sk).await;
+                        // Reply on the same stream with a length-prefixed SignedMessage
+                        let resp = SignedMessage::new(NetworkMessage::ChainResponse(chain_blocks), &sk);
+                        let resp_buf = serde_json::to_vec(&resp).expect("serialize");
+                        let resp_buf = prefix_with_length(resp_buf);
+                        if let Err(e) = stream.write_all(&resp_buf).await {
+                            tracing::error!("Failed to write ChainResponse: {}", e);
+                        }
+                        return;
                     }
                     NetworkMessage::ChainResponse(their_chain) => {
                         tracing::info!(
