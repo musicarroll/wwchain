@@ -432,8 +432,14 @@ async fn main() {
                         e.into_inner()
                     }
                 };
-                let bal = wallet.balance(&bc);
-                tracing::info!("Balance for {}: {}", my_address, bal);
+                if parts.len() == 2 {
+                    let addr = parts[1];
+                    let bal = bc.balances.get(addr).copied().unwrap_or(0);
+                    tracing::info!("Balance for {}: {}", addr, bal);
+                } else {
+                    let bal = wallet.balance(&bc);
+                    tracing::info!("Balance for {}: {}", my_address, bal);
+                }
             }
             "puzzle-stats" if matches!(network, Network::Testnet) => {
                 let bc = match blockchain.lock() {

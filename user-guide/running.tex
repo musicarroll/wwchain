@@ -51,14 +51,31 @@ cargo run --bin rest_shim
 
 \subsection{Endpoints}
 \begin{itemize}
-\item \texttt{GET /health} \to ``ok''
-\item \texttt{POST /text} with \texttt{\{ "text": "hi", "peer": "127.0.0.1:6001"? \}} \to signed \texttt{Text}
-\item \texttt{POST /event} with \texttt{\{ "kind": "puzzle\_complete", "data": \{...\}, "peer"? \}} \to signed \texttt{AppEvent}
-\item \texttt{POST /tx} with \texttt{\{ "recipient": "<hex pub>", "amount": 1, "nonce": 42, "peer"? \}} \to signed \texttt{Transaction}
+\item \texttt{GET /health} $\to$ JSON with \texttt{status}, \texttt{peer\_reachable}
+\item \texttt{GET /info} $\to$ JSON \texttt{\{ pubkey\_hex, peer\_addr, network, height, peer\_reachable \}}
+\item \texttt{POST /text} with \texttt{\{ "text": "hi", "peer": "127.0.0.1:6001"? \}} $\to$ signed \texttt{Text}
+\item \texttt{POST /event} with \texttt{\{ "kind": "puzzle\_complete", "data": \{...\}, "peer"? \}} $\to$ signed \texttt{AppEvent}
+\item \texttt{POST /tx} with \texttt{\{ "recipient": "<hex pub>", "amount": 1, "nonce": 42, "peer"? \}} $\to$ signed \texttt{Transaction}
+\item \texttt{GET /balance/<pubkey>} $\to$ JSON \texttt{\{ pubkey, balance, height, next\_nonce \}}
 \item \texttt{GET /chain} returns the full chain as JSON (list of blocks).
+\item \textbf{Client-signed forwarding}:
+  \begin{itemize}
+  \item \texttt{POST /tx\_signed} with \texttt{\{ "signed": SignedMessage, "peer"? \}}; requires \texttt{Transaction} payload inside \texttt{SignedMessage}
+  \item \texttt{POST /event\_signed} with \texttt{\{ "signed": SignedMessage, "peer"? \}}; requires \texttt{AppEvent} payload inside \texttt{SignedMessage}
+  \end{itemize}
+\item \textbf{Signature verification}: \texttt{POST /verify\_signature} with \texttt{\{ "pubkey": "<66 hex>", "message": "<utf8>", "signature": "<128 hex>" \}} $\to$ JSON \texttt{\{ valid: bool \}}
 \end{itemize}
 
-When \texttt{WWCHAIN\_REST\_TOKEN} is set the shim requires either an \texttt{X-Auth-Token} header or \texttt{Authorization: Bearer <token>} on POST requests.
+When \texttt{WWCHAIN\_REST\_TOKEN} is set the shim requires either an \texttt{X-Auth-Token} header or \texttt{Authorization: Bearer <token>} on POST requests (\texttt{/text}, \texttt{/event}, \texttt{/tx}).
+
+\subsection{Client-signed flow}
+For non-custodial clients (e.g., browser wallets) that hold their own keys:
+\begin{enumerate}
+\item Build a \texttt{NetworkMessage} (\texttt{Transaction} or \texttt{AppEvent}).
+\item Wrap it in \texttt{VersionedMessage} (\texttt{\{version:1, payload\}}), serialize, and sign its SHA-256 digest with secp256k1 (64-byte compact), producing a \texttt{SignedMessage}.
+\item Send the \texttt{SignedMessage} to \texttt{/tx\_signed} or \texttt{/event\_signed}.
+\end{enumerate}
+Use \texttt{/verify\_signature} to verify ECDSA signatures over arbitrary UTF-8 messages (e.g., one-time challenges) given a compressed secp256k1 public key.
 
 \subsection{AppEvent structure}
 For structured application messages the shim sends a signed \texttt{AppEvent}:
@@ -85,3 +102,14 @@ python manage.py summarize_chain_events --period day --days 14 --source both
 \end{itemize}
 
 For production deployments keep the shim bound to localhost, enable token auth, and leave \texttt{CHAIN\_EVENTS\_ENABLED} off until integration is planned.
+
+\section{Chains, Difficulty, and Testnet}
+Mainnet and testnet differ in difficulty targets. The node automatically lowers difficulty for testnet mining; the shim aligns validation during reconciliation so that \texttt{/info}, \texttt{/balance}, and \texttt{/chain} reflect the correct testnet chain.
+
+\section{CLI Tips}
+From the node prompt:
+\begin{itemize}
+\item \texttt{balance} prints this node's wallet balance.
+\item \texttt{balance <pubkey>} prints the balance for an arbitrary address.
+\item \texttt{tx <recipient> <amount>} mines immediately in a single-node setup.
+\end{itemize}
